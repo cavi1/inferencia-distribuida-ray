@@ -1,0 +1,39 @@
+# Cluster Ray: 1 head (coordina, no ejecuta trabajo) + 2 workers.
+# Cada worker publica un recurso propio (nodo_a / nodo_b) para ubicar actores.
+x-base: &base
+  build: .
+  image: inferencia-ray
+  shm_size: 2gb              # object store de Ray
+  cap_add: [NET_ADMIN]       # permite simular latencia con tc (scripts/latencia.sh)
+  volumes:
+    - ./src:/app/src
+    - ./resultados:/app/resultados
+  environment:
+    CLUSTER_RAY: auto
+    HF_HUB_OFFLINE: "1"
+    RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO: "0"
+
+services:
+  ray-head:
+    <<: *base
+    hostname: ray-head
+    command: ["ray", "start", "--head", "--port=6379", "--num-cpus=0",
+              "--resources={\"head\": 1}", "--dashboard-host=0.0.0.0", "--block"]
+    ports:
+      - "8265:8265"          # dashboard: http://localhost:8265
+
+  ray-worker-1:
+    <<: *base
+    hostname: nodo-a
+    command: ["ray", "start", "--address=ray-head:6379", "--num-cpus=2",
+              "--resources={\"nodo_a\": 1}", "--block"]
+    depends_on: [ray-head]
+    restart: on-failure
+
+  ray-worker-2:
+    <<: *base
+    hostname: nodo-b
+    command: ["ray", "start", "--address=ray-head:6379", "--num-cpus=2",
+              "--resources={\"nodo_b\": 1}", "--block"]
+    depends_on: [ray-head]
+    restart: on-failure
