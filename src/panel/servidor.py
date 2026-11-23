@@ -58,6 +58,14 @@ def chat_js():
     return FileResponse(os.path.join(AQUI, "chat.js"), media_type="text/javascript")
 
 
+@app.get("/fuentes/{archivo}")
+def fuentes(archivo: str):
+    ruta = os.path.join(AQUI, "fuentes", os.path.basename(archivo))  # basename: nada fuera de fuentes/
+    if not os.path.isfile(ruta):
+        raise HTTPException(404)
+    return FileResponse(ruta)
+
+
 @app.get("/figura.svg")
 def figura():
     return FileResponse(os.path.join(AQUI, "figura.svg"), media_type="image/svg+xml")

@@ -4,38 +4,78 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Inferencia distribuida con Ray · panel</title>
+<link rel="stylesheet" href="/fuentes/fuentes.css">
 <style>
+  /* estilo «Instrumento»: grises cálidos y el azul del dibujo isométrico; IBM Plex Sans + Plex Mono */
   :root {
-    --fondo: #f6f7f9; --tarjeta: #ffffff; --tinta: #1b2330; --tenue: #5d6878; --linea: #d5dae2;
-    --acento: #2b6cb0; --acento-fondo: #e3eefb; --alerta: #c0392b; --alerta-fondo: #fbe9e7; --ok: #2f855a;
-    --nodo-a: #2b6cb0; --nodo-b: #d0661c; --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --fondo: #f2f2ef; --tarjeta: #fbfbfa; --tinta: #18181a; --tenue: #5f5f65; --linea: #d9d9d5;
+    --acento: #2f5fd0; --acento-fondo: #e4eafb; --sobre-acento: #fff;
+    --alerta: #c0392b; --alerta-fondo: #fbe9e7; --ok: #2f855a; --ok-fondo: #e1f0e7;
+    --nodo-a: #2f5fd0; --nodo-b: #d9622b;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --fondo: #12161c; --tarjeta: #1b212a; --tinta: #e8ecf2; --tenue: #9aa5b5; --linea: #343c48;
-      --acento: #63a4ec; --acento-fondo: #1d3350; --alerta: #ff7b6b; --alerta-fondo: #3b1f1c; --ok: #5fc08b;
-      --nodo-a: #63a4ec; --nodo-b: #f0a05a;
+      --fondo: #0d0d0d; --tarjeta: #151515; --tinta: #e6e6e6; --tenue: #8e8e93; --linea: #2b2b2b;
+      --acento: #6b9bff; --acento-fondo: #18243f; --sobre-acento: #0d0d0d;
+      --alerta: #ff7b6b; --alerta-fondo: #3b1f1c; --ok: #6be0a0; --ok-fondo: #13291e;
+      --nodo-a: #6b9bff; --nodo-b: #ff9a5c;
+      color-scheme: dark;
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--fondo); color: var(--tinta); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  main { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; }
-  h1 { font-size: 22px; margin: 0 0 2px; }
-  .sub { color: var(--tenue); margin: 0 0 16px; }
-  .tarjeta { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
-  #pestanas { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-  #pestanas button { border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta); padding: 8px 14px; border-radius: 999px; cursor: pointer; font: inherit; }
-  #pestanas button.activa { background: var(--acento); border-color: var(--acento); color: #fff; }
-  #controles { display: flex; gap: 14px 18px; flex-wrap: wrap; align-items: end; }
-  #controles label { display: flex; flex-direction: column; font-size: 13px; color: var(--tenue); gap: 3px; }
-  #controles select, #controles input { font: inherit; padding: 6px 8px; border: 1px solid var(--linea); border-radius: 8px; background: var(--fondo); color: var(--tinta); }
-  #controles input { width: 84px; }
-  .botones { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
-  .botones button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta); cursor: pointer; }
-  .botones button.principal { background: var(--acento); border-color: var(--acento); color: #fff; }
-  .botones button.peligro { border-color: var(--alerta); color: var(--alerta); }
-  .botones button:disabled { opacity: .45; cursor: not-allowed; }
-  #queMirar { margin: 0 0 12px; color: var(--tenue); }
+  body { margin: 0; background: var(--fondo); color: var(--tinta); font: 15px/1.5 var(--sans); }
+  main { max-width: 1120px; margin: 0 auto; padding: 0 16px 48px; }
+  button { font-family: inherit; }
+  :focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+
+  /* encabezado con el estado del cluster */
+  .cabeza { display: flex; justify-content: space-between; align-items: end; gap: 12px 24px; flex-wrap: wrap; padding-top: 22px; }
+  h1 { font-size: 22px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 2px; }
+  .sub { color: var(--tenue); margin: 0; max-width: 64ch; }
+  #cluster { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--linea); border-radius: 6px; padding: 3px 9px; background: var(--tarjeta); font: 12.5px/1.4 var(--mono); }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-fondo); }
+  .chip.caido { border-color: var(--alerta); color: var(--alerta); }
+  .chip.caido i { background: var(--alerta); box-shadow: none; }
+  .chip.sin-dato i { background: var(--linea); box-shadow: none; }
+  #cluster a { color: var(--acento); text-decoration: none; margin-left: 4px; }
+  #cluster a:hover { text-decoration: underline; }
+
+  /* pestañas subrayadas, fijas arriba */
+  #pestanas { position: sticky; top: 0; z-index: 5; background: var(--fondo); display: flex; gap: 4px; border-bottom: 1px solid var(--linea); margin: 18px 0 0; overflow-x: auto; }
+  #pestanas button { border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; color: var(--tenue); padding: 12px 14px 10px; cursor: pointer; white-space: nowrap;
+    font: 500 13px/1.2 var(--mono); letter-spacing: .03em; text-transform: uppercase; }
+  #pestanas button b { font-weight: 500; margin-right: 8px; opacity: .7; }
+  #pestanas button:hover:not(:disabled) { color: var(--tinta); }
+  #pestanas button.activa { color: var(--tinta); font-weight: 600; border-bottom-color: var(--acento); }
+  #pestanas button.activa b { color: var(--acento); opacity: 1; }
+  #pestanas button:disabled:not(.activa) { opacity: .45; cursor: not-allowed; }
+
+  /* secciones sin tarjeta, separadas por una línea */
+  .tarjeta { padding: 16px 0; border-bottom: 1px solid var(--linea); }
+  .tarjeta.sin-linea { border-bottom: 0; padding-bottom: 0; }
+  #queMirar { margin: 4px 0 16px; color: var(--tenue); max-width: 78ch; }
+
+  /* controles: segmentos, − / + y un botón principal */
+  #controles { display: flex; gap: 14px 28px; flex-wrap: wrap; align-items: end; }
+  .campo { display: grid; gap: 6px; font-size: 13px; color: var(--tenue); }
+  .seg { display: inline-flex; border: 1px solid var(--linea); border-radius: 6px; overflow: hidden; background: var(--tarjeta); }
+  .seg button { border: 0; border-left: 1px solid var(--linea); background: none; color: var(--tenue); padding: 6px 11px; font: 13.5px/1.2 var(--mono); cursor: pointer; }
+  .seg button:first-child { border-left: 0; }
+  .seg button:hover { color: var(--tinta); }
+  .seg button[aria-pressed="true"] { background: var(--acento-fondo); color: var(--acento); font-weight: 600; }
+  .paso { display: inline-flex; align-items: center; gap: 10px; color: var(--tinta); }
+  .paso button { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta); cursor: pointer; font-size: 16px; line-height: 1; }
+  .paso button:disabled { opacity: .35; cursor: default; }
+  .paso b { min-width: 2ch; text-align: center; font: 600 15px/1 var(--mono); }
+  .botones { display: flex; gap: 16px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+  .botones button { font: inherit; cursor: pointer; }
+  .botones button.principal { border: 0; background: var(--acento); color: var(--sobre-acento); font-weight: 600; padding: 9px 18px; border-radius: 6px; }
+  .botones button.enlace { border: 0; background: none; color: var(--tenue); padding: 4px 0; text-decoration: underline; text-underline-offset: 3px; }
+  .botones button.peligro { border: 1px solid var(--alerta); background: none; color: var(--alerta); padding: 8px 14px; border-radius: 6px; }
+  .botones button:disabled { opacity: .4; cursor: not-allowed; }
   #banner { display: none; background: var(--alerta-fondo); color: var(--alerta); border: 1px solid var(--alerta); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; white-space: pre-wrap; }
   #ahora { min-height: 24px; font-weight: 600; margin: 4px 2px 10px; }
   #ahora .pequeno { font-weight: 400; color: var(--tenue); }
@@ -43,18 +83,23 @@
   svg text { font-family: inherit; fill: var(--tinta); }
   .tenue { fill: var(--tenue) !important; }
   #resultados { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
-  .res { border: 1px solid var(--linea); border-radius: 10px; padding: 10px 12px; }
+  .res { border: 1px solid var(--linea); border-radius: 6px; padding: 10px 12px; background: var(--tarjeta); }
+  .res.vacio { border-style: dashed; background: none; }
+  .res.vacio .v { color: var(--linea); }
   .res .n { font-size: 12px; color: var(--tenue); }
-  .res .v { font-size: 22px; font-weight: 650; }
+  .res .v { font: 600 22px/1.3 var(--mono); }
+  .titulo { font-weight: 600; margin-bottom: 6px; }
   .res.destacado { border-color: var(--acento); background: var(--acento-fondo); }
+  #resultados { margin-top: 14px; }
   #conclusion { margin: 10px 2px 0; font-weight: 600; }
   details { color: var(--tenue); }
+  summary { cursor: pointer; }
   details p { margin: 8px 0; }
   footer { color: var(--tenue); font-size: 13px; margin-top: 18px; }
   a { color: var(--acento); }
 
   /* ---- pestaña «Completá la frase» ---- */
-  #vistaFrase { display: grid; gap: 18px; }
+  #vistaFrase { display: grid; gap: 18px; padding-top: 18px; }
   #vistaFrase[hidden] { display: none; }
   /* compositor: una línea de texto grande, como escribir en el teclado del dibujo */
   #vistaFrase form { display: grid; gap: 12px; }
@@ -62,11 +107,11 @@
   #vistaFrase .linea-texto:focus-within { border-color: var(--acento); }
   #vistaFrase #texto { flex: 1; min-width: 0; border: 0; background: transparent; font: 22px/1.3 var(--mono); color: var(--tinta); outline: none; padding: 4px 0; }
   #vistaFrase #texto::placeholder { color: var(--tenue); }
-  #vistaFrase #completar { border: 0; background: var(--acento); color: #fff; font: 600 15px/1 inherit; padding: 11px 18px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+  #vistaFrase #completar { border: 0; background: var(--acento); color: var(--sobre-acento); font: 600 15px/1 var(--sans); padding: 11px 18px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
   #vistaFrase #completar:disabled { opacity: .45; cursor: default; }
   #vistaFrase .opciones { display: flex; gap: 10px 24px; flex-wrap: wrap; align-items: center; color: var(--tenue); font-size: 14px; }
   #vistaFrase .modo { display: flex; gap: 6px; }
-  #vistaFrase .modo label { cursor: pointer; padding: 6px 12px; border-radius: 999px; border: 1px solid transparent; color: var(--tenue); }
+  #vistaFrase .modo label { cursor: pointer; padding: 6px 12px; border-radius: 6px; border: 1px solid transparent; color: var(--tenue); }
   #vistaFrase .modo input { position: absolute; opacity: 0; pointer-events: none; }
   #vistaFrase .modo input:checked + span { color: var(--tinta); font-weight: 600; }
   #vistaFrase .modo label:has(input:checked) { border-color: var(--linea); background: var(--tarjeta); }
@@ -74,7 +119,7 @@
   #vistaFrase .cuantas { display: flex; align-items: center; gap: 8px; }
   #vistaFrase .cuantas button { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta); cursor: pointer; font-size: 16px; line-height: 1; }
   #vistaFrase #cuantas { min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; color: var(--tinta); font-weight: 600; }
-  #vistaFrase #caida { margin-left: auto; border: 1px solid var(--alerta); color: var(--alerta); background: transparent; border-radius: 999px; padding: 6px 14px; cursor: pointer; font: inherit; }
+  #vistaFrase #caida { margin-left: auto; border: 1px solid var(--alerta); color: var(--alerta); background: transparent; border-radius: 6px; padding: 6px 14px; cursor: pointer; font: inherit; }
   #vistaFrase #caida:disabled { opacity: .35; cursor: default; }
   #vistaFrase .aviso { color: var(--tenue); font-size: 13px; margin: 0; }
   #vistaFrase #error { display: none; background: var(--alerta-fondo); color: var(--alerta); border-radius: 10px; padding: 10px 14px; }
@@ -113,8 +158,13 @@
 </head>
 <body>
 <main>
-  <h1>Inferencia distribuida con Ray</h1>
-  <p class="sub">Un modelo de lenguaje repartido entre los nodos de un cluster: mirá qué calcula cada nodo, cuándo se pasan datos y cuánto se espera.</p>
+  <header class="cabeza">
+    <div>
+      <h1>Inferencia distribuida con Ray</h1>
+      <p class="sub">Un modelo de lenguaje repartido entre los nodos de un cluster: mirá qué calcula cada nodo, cuándo se pasan datos y cuánto se espera.</p>
+    </div>
+    <div id="cluster" aria-label="Estado del cluster"></div>
+  </header>
 
   <div id="pestanas" role="tablist"></div>
   <div class="tarjeta solo-demo">
@@ -159,27 +209,24 @@
   </section>
   </section>
 
-  <div class="tarjeta solo-demo">
+  <div class="tarjeta sin-linea solo-demo">
     <div id="ahora"></div>
     <svg id="escenario" viewBox="0 0 1100 340" role="img" aria-label="Cluster: head y dos nodos, con los datos viajando entre ellos"></svg>
   </div>
-  <div class="tarjeta solo-demo">
-    <div style="font-weight:600;margin-bottom:6px">Línea de tiempo por nodo <span class="pequeno tenue" id="leyendaColor" style="font-weight:400"></span></div>
+  <div class="tarjeta solo-demo" style="border-top:1px solid var(--linea)">
+    <div class="titulo">Línea de tiempo por nodo <span class="pequeno tenue" id="leyendaColor" style="font-weight:400"></span></div>
     <svg id="tiempo" viewBox="0 0 1100 250" role="img" aria-label="Línea de tiempo: qué hizo cada nodo y cuándo"></svg>
-  </div>
-  <div class="tarjeta solo-demo">
     <div id="resultados"></div>
     <div id="conclusion"></div>
   </div>
 
-  <details class="tarjeta solo-demo">
+  <details class="tarjeta sin-linea solo-demo">
     <summary>Cómo leer este panel</summary>
     <p><b>Arriba</b> está el cluster: el <i>head</i> coordina (reparte y junta resultados) y los nodos A y B hacen el cálculo. Un nodo se ilumina mientras trabaja y cada círculo que viaja entre nodos es un dato (por ejemplo, el resultado de una capa) que se manda por la red.</p>
     <p><b>Abajo</b> está la línea de tiempo: una fila por nodo, una barra por cada tramo de trabajo. Los <b>huecos</b> entre barras son tiempo de espera y comunicación. Cuantos más huecos, menos conviene ese reparto.</p>
     <p>Los eventos se miden en cada proceso con su reloj. Al correr en Docker, los contenedores comparten el reloj del equipo, así que se pueden ordenar entre sí. En un cluster real habría que sincronizar los relojes.</p>
     <p>Con la velocidad en cámara lenta se puede ver lo que dura milisegundos. Las mediciones de tiempo se hicieron a velocidad real: la cámara lenta solo cambia cómo se reproduce.</p>
   </details>
-  <footer>Dashboard propio de Ray: <a id="enlaceRay" href="#" target="_blank" rel="noopener">puerto 8265</a></footer>
 </main>
 
 <script>
@@ -192,7 +239,7 @@ const DEMOS = {
     velocidad: 0.05,
     color: "capa",
     params: [
-      { id: "n", etiqueta: "Tamaño de la matriz", tipo: "select", opciones: [[256, "256 (muy chica)"], [512, "512"], [1024, "1024"], [2048, "2048"], [4096, "4096 (más lenta)"]], defecto: 1024 },
+      { id: "n", etiqueta: "Tamaño de la matriz", tipo: "select", opciones: [[256, "256"], [512, "512"], [1024, "1024"], [2048, "2048"], [4096, "4096"]], defecto: 1024 },
       { id: "capas", etiqueta: "Capas", tipo: "numero", min: 2, max: 16, defecto: 8 },
     ],
   },
@@ -214,13 +261,14 @@ const DEMOS = {
     ],
   },
 };
-const VELOCIDADES = [[1, "Tiempo real"], [0.5, "× 1/2"], [0.2, "× 1/5"], [0.1, "× 1/10"], [0.05, "× 1/20"], [0.02, "× 1/50"]];
+const VELOCIDADES = [[1, "real"], [0.5, "×1/2"], [0.2, "×1/5"], [0.1, "×1/10"], [0.05, "×1/20"], [0.02, "×1/50"]];
 const ORDEN_NODOS = ["ray-head", "nodo-a", "nodo-b"];
 const ROL = { "ray-head": "head · coordina", "nodo-a": "worker A", "nodo-b": "worker B" };
 const PALETA = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2", "#eeca3b", "#9d755d", "#7f8fa6", "#ff9da6"];
 const TEXTO_OSCURO = new Set([4, 6, 9]);
 const POS = { "ray-head": { x: 550, y: 66, w: 320, h: 92 }, "nodo-a": { x: 215, y: 262, w: 300, h: 100 }, "nodo-b": { x: 885, y: 262, w: 300, h: 100 } };
 const MIN_PAQUETE = 0.004;
+const NODO_COLOR = { "nodo-a": "var(--nodo-a)", "nodo-b": "var(--nodo-b)" };
 
 const $ = (id) => document.getElementById(id);
 const S = {
@@ -334,22 +382,31 @@ async function sondearNodos() {
     S.vivos = new Map();
     for (const n of lista) if (n.vivo) S.vivos.set(n.nombre, true);
     if (S.d) derivar();
+    dibujarCluster();
   } catch (_) {}
   setTimeout(sondearNodos, 2000);
 }
 
 // ---------------------------------------------------------------- interfaz
+function dibujarCluster() {
+  $("cluster").innerHTML = ORDEN_NODOS.map((n) => {
+    const clase = !S.nodos.size ? "sin-dato" : S.vivos.has(n) ? "" : "caido";  // igual criterio que el dibujo
+    const dice = clase === "caido" ? "caído" : clase ? "sin datos" : "vivo";
+    return `<span class="chip ${clase}" title="${n}: ${dice}"><i></i>${n}</span>`;
+  }).join("") + `<a href="${location.protocol}//${location.hostname}:8265" target="_blank" rel="noopener">Dashboard de Ray ↗</a>`;
+}
 function construirPestanas() {
   const cont = $("pestanas");
   cont.innerHTML = "";
   for (const [id, d] of Object.entries(DEMOS)) {
     const b = document.createElement("button");
-    b.textContent = d.nombre; b.className = id === S.demo ? "activa" : "";
+    const [num, nom] = d.nombre.split(" · ");
+    b.innerHTML = `<b>${num}</b>${nom}`; b.className = id === S.demo ? "activa" : "";
     b.onclick = () => { if (S.corriendo) return; elegirDemo(id); };
     cont.appendChild(b);
   }
   const frase = document.createElement("button");
-  frase.textContent = "4 · Completá la frase"; frase.className = S.demo === "frase" ? "activa" : "";
+  frase.innerHTML = "<b>4</b>Completá la frase"; frase.className = S.demo === "frase" ? "activa" : "";
   frase.onclick = () => { if (!S.corriendo) elegirFrase(); };
   cont.appendChild(frase);
 }
@@ -372,30 +429,37 @@ function elegirDemo(id) {
 }
 function vacio() { return { fases: [], spans: [], transf: [], fallas: [], marcas: [], terminados: [], resumenes: {}, comparacion: null, estado: "", error: null, fin: false, tCero: null, fin_datos: 0 }; }
 function derivarVacio() { S.eventos = []; S.d = vacio(); }
+const valorParam = (p) => Number(S.params[S.demo + "." + p.id] ?? p.defecto);
+const segmentos = (etiqueta, opciones, actual, clave) =>
+  `<div class="campo" role="group" aria-label="${etiqueta}">${etiqueta}<div class="seg">${opciones.map(([v, t]) =>
+    `<button type="button" data-${clave}="${v}" aria-pressed="${Number(v) === actual}">${t}</button>`).join("")}</div></div>`;
 function construirControles() {
   const cont = $("controles");
   const demo = DEMOS[S.demo];
   let html = "";
   for (const p of demo.params) {
-    const val = S.params[S.demo + "." + p.id] ?? p.defecto;
-    if (p.tipo === "select") {
-      html += `<label>${p.etiqueta}<select id="p_${p.id}">${p.opciones.map(([v, t]) => `<option value="${v}" ${String(v) === String(val) ? "selected" : ""}>${t}</option>`).join("")}</select></label>`;
-    } else {
-      html += `<label>${p.etiqueta}<input id="p_${p.id}" type="number" min="${p.min}" max="${p.max}" value="${val}"></label>`;
-    }
+    const val = valorParam(p);
+    if (p.tipo === "select") html += segmentos(p.etiqueta, p.opciones, val, "p-" + p.id);
+    else html += `<div class="campo">${p.etiqueta}<div class="paso"><button type="button" data-menos="${p.id}" aria-label="Menos ${p.etiqueta.toLowerCase()}" ${val <= p.min ? "disabled" : ""}>−</button><b>${val}</b><button type="button" data-mas="${p.id}" aria-label="Más ${p.etiqueta.toLowerCase()}" ${val >= p.max ? "disabled" : ""}>+</button></div></div>`;
   }
-  html += `<label>Velocidad<select id="velocidad">${VELOCIDADES.map(([v, t]) => `<option value="${v}" ${v === S.vel ? "selected" : ""}>${t}</option>`).join("")}</select></label>`;
+  html += segmentos("Velocidad", VELOCIDADES, S.vel, "vel");
   html += `<div class="botones">
-    <button id="btnEjecutar" class="principal">▶ Ejecutar</button>
-    <button id="btnRepetir">↺ Ver de nuevo</button>
+    <button id="btnRepetir" class="enlace">↺ Ver de nuevo</button>
     ${S.demo === "replicas" ? '<button id="btnFalla" class="peligro">⚡ Simular caída</button>' : ""}
+    <button id="btnEjecutar" class="principal">▶ Ejecutar</button>
   </div>`;
   cont.innerHTML = html;
-  $("velocidad").onchange = (e) => { S.vel = parseFloat(e.target.value); };
+  const fijar = (p, v) => { S.params[S.demo + "." + p.id] = clamp(v, p.min ?? -Infinity, p.max ?? Infinity); construirControles(); };
+  for (const p of demo.params) {
+    cont.querySelectorAll(`[data-p-${p.id}]`).forEach((b) => (b.onclick = () => fijar(p, Number(b.getAttribute(`data-p-${p.id}`)))));
+    const menos = cont.querySelector(`[data-menos="${p.id}"]`), mas = cont.querySelector(`[data-mas="${p.id}"]`);
+    if (menos) menos.onclick = () => fijar(p, valorParam(p) - 1);
+    if (mas) mas.onclick = () => fijar(p, valorParam(p) + 1);
+  }
+  cont.querySelectorAll("[data-vel]").forEach((b) => (b.onclick = () => { S.vel = Number(b.dataset.vel); construirControles(); }));
   $("btnEjecutar").onclick = ejecutar;
   $("btnRepetir").onclick = () => { S.tPlay = 0; };
   if ($("btnFalla")) $("btnFalla").onclick = () => api("/api/falla", {}).catch(mostrarError);
-  for (const p of demo.params) $("p_" + p.id).onchange = (e) => { S.params[S.demo + "." + p.id] = e.target.value; };
   actualizarBotones();
 }
 function actualizarBotones() {
@@ -410,7 +474,7 @@ function mostrarError(e) {
 }
 async function ejecutar() {
   const cuerpo = { demo: S.demo };
-  for (const p of DEMOS[S.demo].params) cuerpo[p.id] = parseInt($("p_" + p.id).value, 10);
+  for (const p of DEMOS[S.demo].params) cuerpo[p.id] = valorParam(p);
   $("banner").style.display = "none";
   try {
     await api("/api/ejecutar", cuerpo);
@@ -427,8 +491,9 @@ function construirEscenario() {
   h += `<g id="enlaces">` + enlaces.map(([a, b]) => `<line x1="${c(a).x}" y1="${c(a).y}" x2="${c(b).x}" y2="${c(b).y}" stroke="var(--linea)" stroke-width="2" stroke-dasharray="6 6"/>`).join("") + `</g>`;
   for (const n of ORDEN_NODOS) {
     const p = c(n);
-    h += `<g id="nodo_${n}"><rect class="caja" x="${p.x - p.w / 2}" y="${p.y - p.h / 2}" width="${p.w}" height="${p.h}" rx="12" fill="var(--tarjeta)" stroke="var(--linea)" stroke-width="2"/>
-      <text x="${p.x}" y="${p.y - p.h / 2 + 28}" text-anchor="middle" font-size="18" font-weight="650">${n}</text>
+    h += `<g id="nodo_${n}"><rect class="caja" x="${p.x - p.w / 2}" y="${p.y - p.h / 2}" width="${p.w}" height="${p.h}" rx="8" fill="var(--tarjeta)" stroke="var(--linea)" stroke-width="2"/>
+      ${NODO_COLOR[n] ? `<rect x="${p.x - p.w / 2 + 12}" y="${p.y - p.h / 2}" width="${p.w - 24}" height="4" rx="2" fill="${NODO_COLOR[n]}"/>` : ""}
+      <text x="${p.x}" y="${p.y - p.h / 2 + 28}" text-anchor="middle" font-size="18" font-weight="600">${n}</text>
       <text class="tenue" x="${p.x}" y="${p.y - p.h / 2 + 48}" text-anchor="middle" font-size="12.5">${ROL[n]}</text>
       <text class="estado" x="${p.x}" y="${p.y + p.h / 2 - 16}" text-anchor="middle" font-size="14">esperando</text></g>`;
   }
@@ -476,13 +541,24 @@ function pasoNice(rango, n) {
 }
 function dibujarTiempo(t) {
   const d = S.d, svg = $("tiempo");
-  const ML = 92, MR = 20, MT = 30, FILA = 50, ancho = 1100 - ML - MR;
+  const ML = 104, MR = 20, MT = 30, FILA = 50, ancho = 1100 - ML - MR;
   const filas = ORDEN_NODOS;
   const hayMarcas = d.fallas.length > 0 || d.marcas.length > 0;
   const H = MT + filas.length * FILA + 34 + (hayMarcas ? 38 : 0);
   svg.setAttribute("viewBox", `0 0 1100 ${H}`);
+  const filasBase = () => filas.map((n, i) => {
+    const y = MT + i * FILA;
+    return `<line x1="${ML}" y1="${y + FILA}" x2="${ML + ancho}" y2="${y + FILA}" stroke="var(--linea)"/>`
+      + (NODO_COLOR[n] ? `<rect x="${ML - 7}" y="${y + 14}" width="3" height="${FILA - 28}" rx="1.5" fill="${NODO_COLOR[n]}"/>` : "")
+      + `<text x="${ML - 14}" y="${y + FILA / 2 + 5}" text-anchor="end" font-size="13" font-weight="600" style="font-family:var(--mono)">${n}</text>`;
+  }).join("");
   if (!d.fases.length) {
-    svg.innerHTML = `<text class="tenue" x="550" y="${H / 2}" text-anchor="middle" font-size="14">${d.fin ? "" : "Todavía no hay datos: apretá «Ejecutar»."}</text>`;
+    // esqueleto: las filas de cada nodo y barras grises de ejemplo, para que se entienda qué va a aparecer
+    const ej = [[0, 0, 0.07], [1, 0.09, 0.22], [2, 0.09, 0.22], [1, 0.28, 0.41], [2, 0.28, 0.41], [1, 0.47, 0.6], [2, 0.47, 0.6]];
+    svg.innerHTML = filasBase() + ej.map(([f, a, b]) => `<rect x="${ML + a * ancho}" y="${MT + f * FILA + 9}" width="${(b - a) * ancho}" height="${FILA - 18}" rx="4" fill="var(--linea)" opacity=".6"/>`).join("")
+      + `<text class="tenue" x="${ML + 0.81 * ancho}" y="${MT + FILA + 22}" text-anchor="middle" font-size="13">Cada barra es un tramo de trabajo;</text>`
+      + `<text class="tenue" x="${ML + 0.81 * ancho}" y="${MT + FILA + 40}" text-anchor="middle" font-size="13">los huecos son espera y comunicación.</text>`
+      + `<text class="tenue" x="${ML}" y="${MT + filas.length * FILA + 18}" font-size="12">${S.corriendo ? "Preparando…" : "Apretá «Ejecutar» para llenarla."}</text>`;
     return;
   }
   const dominio = Math.max(d.fin ? d.fin_datos : Math.max(d.fin_datos, t) * 1.08, 0.05);
@@ -493,11 +569,7 @@ function dibujarTiempo(t) {
     h += `<rect x="${x0.toFixed(1)}" y="${MT - 4}" width="${Math.max(0, x1 - x0).toFixed(1)}" height="${filas.length * FILA + 4}" fill="${i % 2 ? "var(--acento-fondo)" : "none"}" opacity="0.55"/>`;
     h += `<text class="tenue" x="${(x0 + 4).toFixed(1)}" y="${MT - 10}" font-size="12">${esc(f.texto.length > 62 ? f.texto.slice(0, 60) + "…" : f.texto)}</text>`;
   });
-  filas.forEach((n, i) => {
-    const y = MT + i * FILA;
-    h += `<line x1="${ML}" y1="${y + FILA}" x2="${ML + ancho}" y2="${y + FILA}" stroke="var(--linea)"/>`;
-    h += `<text x="${ML - 10}" y="${y + FILA / 2 + 5}" text-anchor="end" font-size="13" font-weight="600">${n}</text>`;
-  });
+  h += filasBase();
   // eje
   const paso = pasoNice(dominio, 6), yEje = MT + filas.length * FILA;
   const unidad = dominio < 1 ? 1000 : 1, sufijo = dominio < 1 ? " ms" : " s";
@@ -566,7 +638,7 @@ function dibujarResultados(t) {
     if (c.relacion) h += `<div class="res destacado"><div class="n">${S.demo === "tensores" ? "Distribuido / un nodo" : "Mejora del solapamiento"}</div><div class="v">${c.relacion.toFixed(2)}×</div><div class="n">${S.demo === "tensores" ? "mayor que 1: distribuir fue más lento" : "mayor que 1: el pipeline ganó"}</div></div>`;
     concl = c.texto;
   }
-  $("resultados").innerHTML = h || `<div class="n tenue">Los resultados aparecen cuando termina cada fase.</div>`;
+  $("resultados").innerHTML = h || `<div class="res vacio"><div class="n">Resultados</div><div class="v">—</div><div class="n">aparecen cuando termina cada fase</div></div>`;
   $("conclusion").textContent = concl;
 }
 function dibujarAhora(t) {
@@ -610,7 +682,7 @@ function cuadro(ahora) {
   S.demo = DEMOS[pedida] ? pedida : "tensores";
   S.vel = q.get("vel") ? parseFloat(q.get("vel")) : DEMOS[S.demo].velocidad;
   if (q.get("parar")) S.parar = parseFloat(q.get("parar"));
-  $("enlaceRay").href = `${location.protocol}//${location.hostname}:8265`;
+  S.vivos = new Map(); dibujarCluster();
   construirPestanas(); derivarVacio(); construirControles(); construirEscenario();
   $("queMirar").textContent = DEMOS[S.demo].mirar;
   $("leyendaColor").textContent = DEMOS[S.demo].color === "capa" ? "· cada color es una capa del modelo" : "· cada color es un pedido";

@@ -169,6 +169,7 @@ src/demo1_tensores.py  paralelismo de tensores (numpy)
 src/demo2_pipeline.py  paralelismo de pipeline (GPT-2 en dos etapas)
 src/demo3_router.py    réplicas + router + tolerancia a fallas
 src/panel/             servidor web (FastAPI), escenarios, página (index.html, chat.js) y figura.svg
+src/panel/fuentes/     IBM Plex guardada en el repo, para usar el panel sin internet
 herramientas/figura/   genera figura.svg (kit isométrico de anatomy)
 docs/chat-panel.md     diseño de la pestaña «Completá la frase»
 src/secuencial.py      misma carga que la demo 3, sin Ray (línea base)
