@@ -85,6 +85,34 @@ docker compose exec ray-head python src/demo1_tensores.py --tamanos 512 2048 614
 
 Por consola no se publica ningún evento al panel, así que las mediciones no tienen costo extra.
 
+### Versión secuencial (sin Ray)
+
+`src/secuencial.py` atiende los mismos 30 pedidos de la demo 3 (misma semilla, 20 tokens) uno detrás de otro, en un solo proceso y sin cluster. Es la línea base para calcular el speedup:
+
+```bash
+docker compose run --rm --no-deps ray-head python src/secuencial.py
+```
+
+Speedup = tiempo de `secuencial.py` / tiempo de `demo3_router.py`. Los resultados quedan en `resultados/secuencial.csv`.
+
+### En dos máquinas reales
+
+`docker-compose.dos-maquinas.yml` reparte el cluster en dos PCs de la misma red: el escritorio corre `ray-head` y `ray-worker-1` (nodo-a), y la notebook corre `ray-worker-2` (nodo-b). Los contenedores usan la red del host porque Ray conecta los nodos directamente por IP. Requiere Docker en Linux en las dos máquinas (en Windows o macOS, `network_mode: host` no expone la IP de la máquina).
+
+1. En las dos máquinas: clonar el repo, `docker compose build` y `cp .env.ejemplo .env` con las IPs reales (`ip -4 addr`).
+2. Permitir el tráfico entre las dos IPs en el firewall, por ejemplo con `sudo ufw allow from <IP de la otra máquina>`. Los puertos son fijos: el escritorio usa 6379–6381, 6390–6391, 8265, 10001, 52365–52378 y 11000–11199; la notebook usa 6400–6401, 52385–52388 y 11200–11299.
+3. Levantar primero el escritorio y después la notebook:
+
+```bash
+docker compose -f docker-compose.dos-maquinas.yml --profile escritorio up -d   # escritorio
+docker compose -f docker-compose.dos-maquinas.yml --profile notebook up -d     # notebook
+```
+
+4. Desde el escritorio: `docker compose -f docker-compose.dos-maquinas.yml exec ray-head ray status` debe mostrar 3 nodos. Las demos se corren igual, con `-f docker-compose.dos-maquinas.yml exec ray-head python src/...`.
+5. Falla: en medio de la demo 3, en la notebook, `docker compose -f docker-compose.dos-maquinas.yml kill ray-worker-2` (o desconectarla de la red).
+
+`scripts/latencia.sh` no se usa en este modo: con red del host, `tc` afectaría a toda la máquina, y además la red ya es real.
+
 ### Simular nodos lejanos
 
 ```bash
@@ -132,5 +160,7 @@ src/demo1_tensores.py  paralelismo de tensores (numpy)
 src/demo2_pipeline.py  paralelismo de pipeline (GPT-2 en dos etapas)
 src/demo3_router.py    réplicas + router + tolerancia a fallas
 src/panel/             servidor web (FastAPI), escenarios y página (index.html)
+src/secuencial.py      misma carga que la demo 3, sin Ray (línea base)
 scripts/latencia.sh    agrega latencia de red con tc/netem
+docker-compose.dos-maquinas.yml  cluster repartido en dos PCs (escritorio + notebook)
 ```

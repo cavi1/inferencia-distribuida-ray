@@ -1,0 +1,63 @@
+# Cluster Ray repartido en dos máquinas reales de la misma red:
+#   escritorio: ray-head (0 CPUs, coordina) + ray-worker-1 (nodo_a)
+#   notebook:   ray-worker-2 (nodo_b)
+#
+# Ray anuncia la IP de cada nodo y los otros nodos se conectan directo a ella,
+# así que los contenedores usan la red del host (network_mode: host) en lugar de
+# la red bridge de Docker. Todos los puertos son fijos para poder abrirlos en el
+# firewall; los dos nodos del escritorio usan puertos distintos entre sí.
+#
+# Las IPs salen del archivo .env (copiar .env.ejemplo). Uso:
+#   escritorio: docker compose -f docker-compose.dos-maquinas.yml --profile escritorio up -d
+#   notebook:   docker compose -f docker-compose.dos-maquinas.yml --profile notebook up -d
+x-base: &base
+  build: .
+  image: inferencia-ray
+  network_mode: host
+  shm_size: 2gb              # object store de Ray
+  volumes:
+    - ./src:/app/src
+    - ./resultados:/app/resultados
+  environment: &env
+    CLUSTER_RAY: auto
+    HF_HUB_OFFLINE: "1"
+    RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO: "0"
+
+services:
+  ray-head:
+    <<: *base
+    profiles: [escritorio]
+    environment: { <<: *env, NOMBRE_NODO: ray-head }
+    command: ["ray", "start", "--head", "--node-ip-address=${IP_ESCRITORIO:?falta IP_ESCRITORIO en .env}",
+              "--port=6379", "--num-cpus=0", "--resources={\"head\": 1}",
+              "--dashboard-host=0.0.0.0", "--dashboard-port=8265", "--ray-client-server-port=10001",
+              "--node-manager-port=6380", "--object-manager-port=6381",
+              "--dashboard-agent-listen-port=52365", "--dashboard-agent-grpc-port=52366",
+              "--runtime-env-agent-port=52367", "--metrics-export-port=52368",
+              "--min-worker-port=11000", "--max-worker-port=11099", "--block"]
+
+  ray-worker-1:
+    <<: *base
+    profiles: [escritorio]
+    environment: { <<: *env, NOMBRE_NODO: nodo-a }
+    command: ["ray", "start", "--address=${IP_ESCRITORIO}:6379", "--node-ip-address=${IP_ESCRITORIO}",
+              "--num-cpus=2", "--resources={\"nodo_a\": 1}",
+              "--node-manager-port=6390", "--object-manager-port=6391",
+              "--dashboard-agent-listen-port=52375", "--dashboard-agent-grpc-port=52376",
+              "--runtime-env-agent-port=52377", "--metrics-export-port=52378",
+              "--min-worker-port=11100", "--max-worker-port=11199", "--block"]
+    depends_on: [ray-head]
+    restart: on-failure
+
+  ray-worker-2:
+    <<: *base
+    profiles: [notebook]
+    environment: { <<: *env, NOMBRE_NODO: nodo-b }
+    command: ["ray", "start", "--address=${IP_ESCRITORIO:?falta IP_ESCRITORIO en .env}:6379",
+              "--node-ip-address=${IP_NOTEBOOK:?falta IP_NOTEBOOK en .env}",
+              "--num-cpus=2", "--resources={\"nodo_b\": 1}",
+              "--node-manager-port=6400", "--object-manager-port=6401",
+              "--dashboard-agent-listen-port=52385", "--dashboard-agent-grpc-port=52386",
+              "--runtime-env-agent-port=52387", "--metrics-export-port=52388",
+              "--min-worker-port=11200", "--max-worker-port=11299", "--block"]
+    restart: on-failure

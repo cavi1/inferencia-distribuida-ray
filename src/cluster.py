@@ -54,5 +54,7 @@ def en_nodo(nombre):
 
 
 def host():
-    """Nombre del contenedor + 4 caracteres del id de nodo de Ray."""
-    return f"{socket.gethostname()}/{ray.get_runtime_context().get_node_id()[:4]}"
+    """Nombre del nodo + 4 caracteres del id de nodo de Ray."""
+    # con network_mode: host todos los contenedores de una máquina comparten hostname
+    nombre = os.environ.get("NOMBRE_NODO") or socket.gethostname()
+    return f"{nombre}/{ray.get_runtime_context().get_node_id()[:4]}"
