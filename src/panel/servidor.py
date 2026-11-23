@@ -8,7 +8,7 @@ de eventos y expone una API chica que usa la página:
   GET  /api/eventos      eventos nuevos desde la posición `desde`
   POST /api/ejecutar     {"demo": "tensores" | "pipeline" | "replicas", ...parámetros}
   POST /api/falla        mata la réplica 2 durante la demo de réplicas (o la réplica en uso del chat)
-  GET  /chat             la página «Completá la frase»
+  GET  /chat.js          la pestaña «Completá la frase» (/?demo=frase)
   POST /api/chat         {"texto", "modo": "replicas" | "pipeline", "palabras"}
   GET  /api/chat         estado de la frase en curso
 """
@@ -53,9 +53,9 @@ def pagina():
     return FileResponse(os.path.join(AQUI, "index.html"))
 
 
-@app.get("/chat")
-def pagina_chat():
-    return FileResponse(os.path.join(AQUI, "chat.html"))
+@app.get("/chat.js")
+def chat_js():
+    return FileResponse(os.path.join(AQUI, "chat.js"), media_type="text/javascript")
 
 
 @app.get("/figura.svg")

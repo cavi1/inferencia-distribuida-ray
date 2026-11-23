@@ -7,7 +7,7 @@ palabra por palabra, mostrando en un dibujo isométrico qué nodo calcula cada p
 viajan los datos. El modelo es chico (GPT-2 small, 124 M de parámetros, 2019): autocompleta, no
 responde preguntas. El foco es el reparto que hace Ray.
 
-## Qué ve el usuario (`http://localhost:8000/chat`)
+## Qué ve el usuario (pestaña 4 del panel, `http://localhost:8000/?demo=frase`)
 
 - Una caja de texto, un selector **Réplicas / Pipeline**, la cantidad de palabras y el botón
   **Completar**. En modo réplicas, también **Simular caída**.
@@ -44,7 +44,7 @@ la animación se acelera para no atrasarse.
 - `src/panel/escenarios.py`: la creación de réplicas y etapas se separa en funciones que usan las
   demos y el chat (se reusan los actores cacheados). Nueva función `chat(p, estado)`.
 - `src/panel/servidor.py`:
-  - `GET /chat`, `GET /figura.svg`.
+  - `GET /chat.js` (la lógica de la pestaña) y `GET /figura.svg`.
   - `POST /api/chat {texto, modo, palabras}` y `GET /api/chat` con el estado de la frase.
   - `POST /api/falla` también vale durante un chat en modo réplicas.
 
@@ -67,13 +67,15 @@ la animación se acelera para no atrasarse.
 - `herramientas/figura/build.mjs` genera `src/panel/figura.svg` con el kit isométrico de anatomy.
   El SVG trae sus estilos, las piezas con `data-part` para encenderlas, y los recorridos de los
   paquetes como `<path data-ruta>` invisibles.
-- Tema claro, sin tarjeta: el dibujo va directo sobre el fondo de la página.
+- Sin tarjeta: el dibujo va directo sobre el fondo. Sigue el tema del panel: claro u oscuro
+  según el sistema.
 
 ## Plan de implementación
 
 1. Backend: muestreo, `Replica.paso`, `Router.elegir/soltar`, escenario `chat`, endpoints.
 2. Prueba por consola: una frase en cada modo y una caída a mitad de frase.
 3. Dibujo: `build.mjs` y `figura.svg`; revisión con capturas.
-4. Página `chat.html`: controles, salida coloreada, animación ligada al estado.
-5. Enlace desde el panel (pestaña «4 · Completá la frase»).
+4. Pestaña «4 · Completá la frase» dentro del panel (`index.html` + `chat.js`): controles, salida
+   coloreada y animación ligada al estado. Sigue el tema claro u oscuro del panel.
+5. `docker-compose.dos-maquinas.yml`: el head también arranca el panel (`http://IP_ESCRITORIO:8000`).
 6. Prueba completa en el navegador, revisión del código con agy y PR.

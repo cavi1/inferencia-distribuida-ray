@@ -1,5 +1,5 @@
 # Cluster Ray repartido en dos máquinas reales de la misma red:
-#   escritorio: ray-head (0 CPUs, coordina) + ray-worker-1 (nodo_a)
+#   escritorio: ray-head (0 CPUs, coordina, y el panel web en el puerto 8000) + ray-worker-1 (nodo_a)
 #   notebook:   ray-worker-2 (nodo_b)
 #
 # Ray anuncia la IP de cada nodo y los otros nodos se conectan directo a ella,
@@ -28,13 +28,16 @@ services:
     <<: *base
     profiles: [escritorio]
     environment: { <<: *env, NOMBRE_NODO: ray-head }
-    command: ["ray", "start", "--head", "--node-ip-address=${IP_ESCRITORIO:?falta IP_ESCRITORIO en .env}",
-              "--port=6379", "--num-cpus=0", "--resources={\"head\": 1}",
-              "--dashboard-host=0.0.0.0", "--dashboard-port=8265", "--ray-client-server-port=10001",
-              "--node-manager-port=6380", "--object-manager-port=6381",
-              "--dashboard-agent-listen-port=52365", "--dashboard-agent-grpc-port=52366",
-              "--runtime-env-agent-port=52367", "--metrics-export-port=52368",
-              "--min-worker-port=11000", "--max-worker-port=11099", "--block"]
+    # Arranca el head de Ray y, en el mismo contenedor, el panel web: http://IP_ESCRITORIO:8000
+    command: ["bash", "-c",
+              "ray start --head --node-ip-address=${IP_ESCRITORIO:?falta IP_ESCRITORIO en .env}
+               --port=6379 --num-cpus=0 --resources='{\"head\": 1}'
+               --dashboard-host=0.0.0.0 --dashboard-port=8265 --ray-client-server-port=10001
+               --node-manager-port=6380 --object-manager-port=6381
+               --dashboard-agent-listen-port=52365 --dashboard-agent-grpc-port=52366
+               --runtime-env-agent-port=52367 --metrics-export-port=52368
+               --min-worker-port=11000 --max-worker-port=11099
+               && exec python src/panel/servidor.py"]
 
   ray-worker-1:
     <<: *base

@@ -1,126 +1,6 @@
-<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Completá la frase · panel</title>
-<style>
-  :root {
-    --fondo: #f6f7f9; --tinta: #1b2330; --tenue: #5d6878; --linea: #d5dae2; --tarjeta: #ffffff;
-    --acento: #2b6cb0; --acento-fondo: #e3eefb; --alerta: #c0392b; --alerta-fondo: #fbe9e7;
-    --nodo-a: #2b6cb0; --nodo-b: #d0661c;
-    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-    color-scheme: light;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--fondo); color: var(--tinta); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  main { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 18px; }
-  h1 { font-size: 22px; margin: 0 0 2px; }
-  .sub { color: var(--tenue); margin: 0; }
-  nav { display: flex; gap: 8px; flex-wrap: wrap; }
-  nav a { border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta); padding: 8px 14px; border-radius: 999px; text-decoration: none; }
-  nav a.activa { background: var(--acento); border-color: var(--acento); color: #fff; }
-
-  /* compositor: una línea de texto grande, como escribir en el teclado del dibujo */
-  form { display: grid; gap: 12px; }
-  .linea-texto { display: flex; align-items: center; gap: 12px; border-bottom: 2px solid var(--tinta); padding: 6px 0; }
-  .linea-texto:focus-within { border-color: var(--acento); }
-  #texto { flex: 1; min-width: 0; border: 0; background: transparent; font: 22px/1.3 var(--mono); color: var(--tinta); outline: none; padding: 4px 0; }
-  #texto::placeholder { color: #6b7380; }
-  #completar { border: 0; background: var(--acento); color: #fff; font: 600 15px/1 inherit; padding: 11px 18px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
-  #completar:disabled { opacity: .45; cursor: default; }
-  .opciones { display: flex; gap: 10px 24px; flex-wrap: wrap; align-items: center; color: var(--tenue); font-size: 14px; }
-  .modo { display: flex; gap: 6px; }
-  .modo label { cursor: pointer; padding: 6px 12px; border-radius: 999px; border: 1px solid transparent; color: var(--tenue); }
-  .modo input { position: absolute; opacity: 0; pointer-events: none; }
-  .modo input:checked + span { color: var(--tinta); font-weight: 600; }
-  .modo label:has(input:checked) { border-color: var(--linea); background: var(--tarjeta); }
-  .modo label:has(input:focus-visible) { outline: 2px solid var(--acento); outline-offset: 2px; }
-  .cuantas { display: flex; align-items: center; gap: 8px; }
-  .cuantas button { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta); cursor: pointer; font-size: 16px; line-height: 1; }
-  #cuantas { min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; color: var(--tinta); font-weight: 600; }
-  #caida { margin-left: auto; border: 1px solid var(--alerta); color: var(--alerta); background: transparent; border-radius: 999px; padding: 6px 14px; cursor: pointer; font: inherit; }
-  #caida:disabled { opacity: .35; cursor: default; }
-  .aviso { color: var(--tenue); font-size: 13px; margin: 0; }
-  #error { display: none; background: var(--alerta-fondo); color: var(--alerta); border-radius: 10px; padding: 10px 14px; }
-
-  /* el dibujo va directo sobre el fondo */
-  .escena { position: relative; }
-  .escena .iso { background: transparent; }
-  .escena svg { width: 100%; max-width: none; height: auto; display: block; }
-  #estado { position: absolute; left: 0; top: 0; font-weight: 600; max-width: 46%; }
-  #estado small { display: block; font-weight: 400; color: var(--tenue); }
-  /* piezas encendidas */
-  [data-part] .iso-solid > path { transition: fill .18s ease, opacity .18s ease; }
-  [data-on="a"] .iso-solid > .iso-top, [data-on="a"] .iso-solid > .iso-fill { fill: var(--nodo-a) !important; }
-  [data-on="a"] .iso-solid > .iso-shade { fill: #1f5592 !important; }
-  [data-on="b"] .iso-solid > .iso-top, [data-on="b"] .iso-solid > .iso-fill { fill: var(--nodo-b) !important; }
-  [data-on="b"] .iso-solid > .iso-shade { fill: #a94f12 !important; }
-  [data-on="h"] .iso-solid > .iso-top { fill: var(--acento-fondo) !important; }
-  [data-on="h"] .iso-solid > .iso-line { stroke: var(--acento) !important; }
-  [data-apagada] { opacity: .28; }
-  [data-caido] .iso-solid > .iso-fill, [data-caido] .iso-solid > .iso-top, [data-caido] .iso-solid > .iso-shade { fill: var(--alerta-fondo) !important; }
-  [data-caido] .iso-solid > .iso-line { stroke: var(--alerta) !important; }
-  .paquete { fill: var(--acento); stroke: #fff; stroke-width: 1.5; }
-  [data-part="frase"] text, [data-part="cinta"] text { font-family: var(--mono); fill: var(--tinta); }
-
-  /* la respuesta */
-  #salida { font: 20px/2 var(--mono); overflow-wrap: anywhere; min-height: 2em; }
-  #salida .prompt { color: var(--tenue); }
-  .tok { border-bottom: 3px solid var(--c); padding: 0 1px; }
-  .tok.a { --c: var(--nodo-a); } .tok.b { --c: var(--nodo-b); }
-  .tok.ab { border-bottom: 0; background: linear-gradient(90deg, var(--nodo-a) 0 50%, var(--nodo-b) 50% 100%) bottom / 100% 3px no-repeat; }
-  .pie { display: flex; gap: 8px 22px; flex-wrap: wrap; color: var(--tenue); font-size: 14px; }
-  .pie i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; }
-  #datos { font-variant-numeric: tabular-nums; }
-  @media (prefers-reduced-motion: reduce) { [data-part] .iso-solid > path { transition: none; } }
-</style>
-</head>
-<body>
-<main>
-  <header>
-    <h1>Inferencia distribuida con Ray</h1>
-    <p class="sub">Escribí el comienzo de una frase y mirá cómo el cluster la completa, palabra por palabra.</p>
-  </header>
-  <nav>
-    <a href="/?demo=tensores">1 · Tensores</a><a href="/?demo=pipeline">2 · Pipeline</a><a href="/?demo=replicas">3 · Réplicas</a><a class="activa" href="/chat">4 · Completá la frase</a>
-  </nav>
-
-  <form id="form" autocomplete="off">
-    <div class="linea-texto">
-      <input id="texto" maxlength="200" placeholder="Distributed systems are" aria-label="Comienzo de la frase, en inglés">
-      <button id="completar" type="submit">Completar</button>
-    </div>
-    <div class="opciones">
-      <div class="modo" role="radiogroup" aria-label="Cómo se reparte">
-        <label><input type="radio" name="modo" value="replicas" checked><span>Réplicas</span></label>
-        <label><input type="radio" name="modo" value="pipeline"><span>Pipeline</span></label>
-      </div>
-      <span id="explica"></span>
-      <div class="cuantas"><button type="button" id="menos" aria-label="Menos palabras">−</button><span id="cuantas">20</span><button type="button" id="mas" aria-label="Más palabras">+</button> palabras</div>
-      <button type="button" id="caida" disabled>Simular caída</button>
-    </div>
-    <p class="aviso">GPT-2 small (124 M de parámetros, 2019) autocompleta texto en inglés: no responde preguntas. Lo que importa acá es cómo Ray reparte el trabajo.</p>
-  </form>
-  <div id="error"></div>
-
-  <section class="escena" aria-live="polite">
-    <div id="estado"></div>
-    <div class="iso" data-theme="light" id="figura"></div>
-  </section>
-
-  <section>
-    <div id="salida"></div>
-    <div class="pie">
-      <span><i style="background:var(--nodo-a)"></i>calculada en nodo-a</span>
-      <span><i style="background:var(--nodo-b)"></i>calculada en nodo-b</span>
-      <span><i style="background:linear-gradient(90deg,var(--nodo-a) 50%,var(--nodo-b) 50%)"></i>pasó por los dos</span>
-      <span id="datos"></span>
-    </div>
-  </section>
-</main>
-
-<script>
+// Pestaña «Completá la frase» del panel: GPT-2 completa una frase en el cluster y el dibujo
+// isométrico (figura.svg) muestra qué nodo calcula cada palabra. Ver docs/chat-panel.md.
+(() => {
 "use strict";
 const $ = (id) => document.getElementById(id);
 const EXPLICA = {
@@ -248,7 +128,7 @@ async function reproducir() {
       try { await animarPalabra(p); } catch (e) { console.error(e); imprimir(p); }  // si falla el dibujo, la palabra igual se muestra
     }
   } finally { S.animando = false; }
-  if (!S.corriendo && S.chat) cerrar();
+  if (!S.corriendo && S.chat && S.mostradas) cerrar();
 }
 function estado(t, sub = "") { $("estado").innerHTML = `${esc(t)}${sub ? `<small>${esc(sub)}</small>` : ""}`; }
 function cerrar() {
@@ -311,7 +191,18 @@ $("menos").onclick = () => { S.cuantas = Math.max(1, S.cuantas - 5 + (S.cuantas 
 $("mas").onclick = () => { S.cuantas = Math.min(40, S.cuantas + 5); $("cuantas").textContent = S.cuantas; };
 document.querySelectorAll("input[name=modo]").forEach((r) => (r.onchange = () => { prepararModo(); actualizarBotones(); }));
 
-cargarFigura().then(() => { estado("Escribí una frase y apretá «Completar»"); textoEn("frase", "Distributed systems are"); sondear(); });
-</script>
-</body>
-</html>
+// el dibujo sigue el tema del panel (claro u oscuro)
+const oscuro = matchMedia("(prefers-color-scheme: dark)");
+const tema = () => $("figura").setAttribute("data-theme", oscuro.matches ? "dark" : "light");
+oscuro.addEventListener("change", tema);
+
+let iniciado = false;
+window.Frase = {
+  mostrar() {
+    tema();
+    if (iniciado) return;
+    iniciado = true;
+    cargarFigura().then(() => { estado("Escribí una frase y apretá «Completar»"); textoEn("frase", "Distributed systems are"); sondear(); });
+  },
+};
+})();
