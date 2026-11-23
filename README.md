@@ -71,6 +71,15 @@ docker compose kill ray-worker-2
 
 Ray tarda unos segundos en declarar muerto al nodo (por falta de *heartbeats*), recrea la réplica en `nodo-a` y reintenta los pedidos. El panel marca el nodo como caído. Como el contenedor tiene `restart: on-failure`, puede volver solo a los pocos segundos.
 
+## Completá la frase
+
+En `http://localhost:8000/chat` (pestaña «4 · Completá la frase») se escribe el comienzo de una frase en inglés y GPT-2 la completa en el cluster, palabra por palabra. Un dibujo isométrico del cluster muestra qué nodo calcula cada palabra:
+
+- **Réplicas:** el Router elige la réplica menos usada y ese nodo genera toda la frase. «Simular caída» mata la réplica a mitad de frase: Ray la recrea y la frase sigue sin perder palabras.
+- **Pipeline:** cada palabra pasa por las capas 1–6 en nodo-a y por las 7–12 en nodo-b.
+
+GPT-2 small autocompleta texto, no responde preguntas: lo que se muestra es el reparto. El diseño está en `docs/chat-panel.md`. El dibujo (`src/panel/figura.svg`) se genera con `herramientas/figura/build.mjs`.
+
 ## Demos por consola
 
 Las mismas demos se pueden correr sin el panel, y guardan sus mediciones en `resultados/*.csv` (con los números para el informe):
@@ -159,7 +168,9 @@ src/eventos.py         bus de eventos que alimenta el panel
 src/demo1_tensores.py  paralelismo de tensores (numpy)
 src/demo2_pipeline.py  paralelismo de pipeline (GPT-2 en dos etapas)
 src/demo3_router.py    réplicas + router + tolerancia a fallas
-src/panel/             servidor web (FastAPI), escenarios y página (index.html)
+src/panel/             servidor web (FastAPI), escenarios, páginas (index.html, chat.html) y figura.svg
+herramientas/figura/   genera figura.svg (kit isométrico de anatomy)
+docs/chat-panel.md     diseño de la pestaña «Completá la frase»
 src/secuencial.py      misma carga que la demo 3, sin Ray (línea base)
 scripts/latencia.sh    agrega latencia de red con tc/netem
 docker-compose.dos-maquinas.yml  cluster repartido en dos PCs (escritorio + notebook)

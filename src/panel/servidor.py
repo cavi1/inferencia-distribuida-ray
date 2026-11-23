@@ -7,7 +7,10 @@ de eventos y expone una API chica que usa la página:
   GET  /api/nodos        nodos del cluster (y si están vivos)
   GET  /api/eventos      eventos nuevos desde la posición `desde`
   POST /api/ejecutar     {"demo": "tensores" | "pipeline" | "replicas", ...parámetros}
-  POST /api/falla        mata la réplica 2 durante la demo de réplicas
+  POST /api/falla        mata la réplica 2 durante la demo de réplicas (o la réplica en uso del chat)
+  GET  /chat             la página «Completá la frase»
+  POST /api/chat         {"texto", "modo": "replicas" | "pipeline", "palabras"}
+  GET  /api/chat         estado de la frase en curso
 """
 import os
 import sys
@@ -50,6 +53,16 @@ def pagina():
     return FileResponse(os.path.join(AQUI, "index.html"))
 
 
+@app.get("/chat")
+def pagina_chat():
+    return FileResponse(os.path.join(AQUI, "chat.html"))
+
+
+@app.get("/figura.svg")
+def figura():
+    return FileResponse(os.path.join(AQUI, "figura.svg"), media_type="image/svg+xml")
+
+
 @app.get("/api/nodos")
 def nodos():
     return [{"id": n["NodeID"], "nombre": nombre_nodo(n), "vivo": n["Alive"]} for n in ray.nodes()]
@@ -88,10 +101,53 @@ def ejecutar(params: dict = Body(...)):
     return {"ok": True}
 
 
+chat_estado = {"fase": "vacio", "palabras": []}
+
+
+def _correr_chat(params):
+    try:
+        escenarios.chat(params, chat_estado)
+    except Exception as e:
+        traceback.print_exc()
+        chat_estado.update(fase="error", error=f"{type(e).__name__}: {e}")
+    finally:
+        estado["corriendo"] = False
+
+
+@app.post("/api/chat")
+def chat(params: dict = Body(...)):
+    texto = params.get("texto")
+    if not isinstance(texto, str):
+        raise HTTPException(400, "falta el texto")
+    texto = texto.strip()
+    modo = params.get("modo")
+    if not 1 <= len(texto) <= 200:
+        raise HTTPException(400, "escribí entre 1 y 200 caracteres")
+    if modo not in ("replicas", "pipeline"):
+        raise HTTPException(400, "modo desconocido")
+    palabras = escenarios._entero(params, "palabras", 20, 1, 40)
+    with bloqueo:
+        if estado["corriendo"]:
+            raise HTTPException(409, "ya hay una ejecución en curso")
+        estado.update(corriendo=True, demo="chat")
+    global chat_estado
+    inicio = time.time()
+    # se reemplaza el dict entero (no clear + update): una consulta nunca ve el estado a medio armar
+    chat_estado = {"fase": "cargando", "modo": modo, "texto": texto, "total": palabras, "palabras": [], "inicio": inicio}
+    threading.Thread(target=_correr_chat, args=({"texto": texto, "modo": modo, "palabras": palabras},), daemon=True).start()
+    return {"ok": True, "inicio": inicio}
+
+
+@app.get("/api/chat")
+def ver_chat():
+    return {**chat_estado, "ahora": time.time()}
+
+
 @app.post("/api/falla")
 def falla():
-    if not estado["corriendo"] or estado["demo"] != "replicas":
-        raise HTTPException(409, "la caída solo se puede simular durante la demo de réplicas")
+    en_chat = estado["demo"] == "chat" and chat_estado.get("modo") == "replicas"
+    if not estado["corriendo"] or not (estado["demo"] == "replicas" or en_chat):
+        raise HTTPException(409, "la caída solo se puede simular con réplicas en marcha")
     escenarios.pedir_falla.set()
     return {"ok": True}
 

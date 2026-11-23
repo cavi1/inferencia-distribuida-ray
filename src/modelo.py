@@ -86,3 +86,19 @@ def generar(paso, ids, n_tokens):
         siguiente = logits[:, -1, :].argmax(dim=-1, keepdim=True)
         ids = torch.cat([ids, siguiente], dim=1)
     return ids
+
+
+def muestrear(logits, ids, generador, temperatura=0.8, top_p=0.9, penalizacion=1.3):
+    """Elige el próximo token con azar controlado (para el chat del panel; las demos usan greedy).
+    Penaliza los tokens ya usados (evita los bucles de GPT-2) y sortea entre los más probables
+    que suman `top_p` de la probabilidad. Con el mismo `generador` da siempre el mismo token."""
+    x = logits[0, -1, :].clone()
+    usados = ids[0].unique()
+    x[usados] = torch.where(x[usados] > 0, x[usados] / penalizacion, x[usados] * penalizacion)
+    p = torch.softmax(x / temperatura, dim=-1)
+    orden = torch.argsort(p, descending=True)
+    acumulada = torch.cumsum(p[orden], dim=0)
+    corte = int((acumulada < top_p).sum()) + 1
+    elegidos = orden[:corte]
+    i = torch.multinomial(p[elegidos] / p[elegidos].sum(), 1, generator=generador)
+    return elegidos[i].view(1, 1)

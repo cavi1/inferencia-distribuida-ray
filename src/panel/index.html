@@ -23,6 +23,7 @@
   .tarjeta { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
   #pestanas { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
   #pestanas button { border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta); padding: 8px 14px; border-radius: 999px; cursor: pointer; font: inherit; }
+  #pestanas a.enlace-chat { border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta); padding: 8px 14px; border-radius: 999px; text-decoration: none; }
   #pestanas button.activa { background: var(--acento); border-color: var(--acento); color: #fff; }
   #controles { display: flex; gap: 14px 18px; flex-wrap: wrap; align-items: end; }
   #controles label { display: flex; flex-direction: column; font-size: 13px; color: var(--tenue); gap: 3px; }
@@ -253,6 +254,9 @@ function construirPestanas() {
     b.onclick = () => { if (S.corriendo) return; elegirDemo(id); };
     cont.appendChild(b);
   }
+  const chat = document.createElement("a");
+  chat.href = "/chat"; chat.textContent = "4 · Completá la frase"; chat.className = "enlace-chat";
+  cont.appendChild(chat);
 }
 function elegirDemo(id) {
   S.demo = id; S.vel = DEMOS[id].velocidad; S.tPlay = 0;
