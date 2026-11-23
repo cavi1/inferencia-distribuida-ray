@@ -3,10 +3,6 @@
 (() => {
 "use strict";
 const $ = (id) => document.getElementById(id);
-const EXPLICA = {
-  replicas: "Cada nodo tiene el modelo entero; el Router elige uno para toda la frase.",
-  pipeline: "Las capas 1–6 están en nodo-a y las 7–12 en nodo-b; cada palabra pasa por los dos.",
-};
 const quieto = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const corto = (n) => n && n.startsWith("nodo-") ? n.slice(5) : null;  // "nodo-a" -> "a"
@@ -34,7 +30,6 @@ async function cargarFigura() {
 function prepararModo() {
   if (!svg) return;
   const m = modo();
-  $("explica").textContent = EXPLICA[m];
   for (const n of ["a", "b"]) for (let i = 1; i <= 12; i++) {
     const enOtroNodo = m === "pipeline" && (n === "a" ? i > 6 : i <= 6);
     part(`capa-${n}-${i}`).toggleAttribute("data-apagada", enOtroNodo);
@@ -89,10 +84,12 @@ async function animarPalabra(p) {
   if (caida && caida.palabra === S.mostradas) {  // la caída se muestra cuando la animación llega a esa palabra
     part(caida.nodo).setAttribute("data-caido", "");
     estado(`Se cayó la réplica de ${caida.nodo}`, `Ray la recreó en ${(p.ms / 1000).toFixed(1)} s y la frase siguió donde estaba`);
-    await esperar(Math.min(p.ms, 4000));
+    await esperar(Math.min(p.ms, 2500));
     part(caida.nodo).removeAttribute("data-caido");
+    S.cayendo = null;
     estado(`Palabra ${S.mostradas + 1} de ${S.chat.total}`, `calcula nodo-${nodos[0]}`);
   }
+  else if (S.cayendo) estado(`Se cayó la réplica de ${S.cayendo}`, "Ray la está recreando…");  // hasta que la animación llegue a la caída
   encender("driver", "h");
   if (nodos.length === 1) {
     encender("router", "h");
@@ -133,6 +130,7 @@ async function reproducir() {
 function estado(t, sub = "") { $("estado").innerHTML = `${esc(t)}${sub ? `<small>${esc(sub)}</small>` : ""}`; }
 function cerrar() {
   const c = S.chat;
+  S.cayendo = null;
   if (c.fase === "listo") estado("Listo", `${c.palabras.length} palabras · ${c.modo === "replicas" ? "atendió " + c.nodo : "pipeline nodo-a → nodo-b"}`);
   for (const n of ["nodo-a", "nodo-b"]) part(n).removeAttribute("data-caido");
   actualizarBotones();
@@ -176,7 +174,7 @@ $("form").onsubmit = async (ev) => {
   mostrarError("");
   try {
     const r = await api("/api/chat", { texto, modo: modo(), palabras: S.cuantas });
-    S.inicio = r.inicio;
+    S.inicio = r.inicio; S.cayendo = null;
     S.corriendo = true; S.mostradas = 0; S.recibidas = 0; S.cola = [];
     S.chat = { total: S.cuantas, palabras: [], fase: "cargando", modo: modo() };
     $("salida").innerHTML = `<span class="prompt">${esc(texto)}</span>`;
@@ -186,7 +184,17 @@ $("form").onsubmit = async (ev) => {
     actualizarBotones();
   } catch (e) { mostrarError(e.message); }
 };
-$("caida").onclick = () => api("/api/falla", {}).catch((e) => mostrarError(e.message));
+$("caida").onclick = async () => {
+  const b = $("caida");
+  b.disabled = true; b.textContent = "Cayendo…";
+  try {
+    const r = await api("/api/falla", {});
+    S.cayendo = r.nodo;  // se muestra ya, sin esperar a que la animación llegue a esa palabra
+    if (part(r.nodo)) part(r.nodo).setAttribute("data-caido", "");
+    estado(`Se cayó la réplica de ${r.nodo}`, "Ray la está recreando…");
+  } catch (e) { mostrarError(e.message); }
+  finally { b.textContent = "Simular caída"; actualizarBotones(); }
+};
 $("menos").onclick = () => { S.cuantas = Math.max(1, S.cuantas - 5 + (S.cuantas % 5 ? 5 - S.cuantas % 5 : 0)); $("cuantas").textContent = S.cuantas; };
 $("mas").onclick = () => { S.cuantas = Math.min(40, S.cuantas + 5); $("cuantas").textContent = S.cuantas; };
 document.querySelectorAll("input[name=modo]").forEach((r) => (r.onchange = () => { prepararModo(); actualizarBotones(); }));

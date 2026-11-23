@@ -156,8 +156,10 @@ def falla():
     en_chat = estado["demo"] == "chat" and chat_estado.get("modo") == "replicas"
     if not estado["corriendo"] or not (estado["demo"] == "replicas" or en_chat):
         raise HTTPException(409, "la caída solo se puede simular con réplicas en marcha")
-    escenarios.pedir_falla.set()
-    return {"ok": True}
+    nodo = escenarios.caer()
+    if nodo is None:
+        raise HTTPException(409, "todavía no hay réplicas en marcha: probá en un segundo")
+    return {"ok": True, "nodo": nodo}
 
 
 def main():

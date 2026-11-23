@@ -4,7 +4,6 @@ y publican, además, el relato de lo que pasa (fases, estado, resúmenes).
 Cada escenario recibe un diccionario de parámetros y no devuelve nada: todo lo
 que el panel necesita sale por eventos (ver eventos.py).
 """
-import threading
 import time
 
 import numpy as np
@@ -19,7 +18,14 @@ from eventos import emitir
 from modelo import cargar_tokenizer, codificar, decodificar, muestrear
 
 _cache = {"pipeline": None, "replicas": None}  # actores que se conservan entre ejecuciones (cargar GPT-2 tarda)
-pedir_falla = threading.Event()
+_caer = {"f": None}  # la escena en marcha deja acá cómo tirar su réplica
+
+
+def caer():
+    """La llama POST /api/falla: mata la réplica en el momento (sin esperar al bucle de la
+    escena) y devuelve el nombre del nodo donde estaba, o None si no hay réplicas en marcha."""
+    f = _caer["f"]
+    return f() if f else None
 
 
 def _entero(p, nombre, defecto, minimo, maximo):
@@ -165,23 +171,28 @@ def replicas(p):
     g = torch.Generator().manual_seed(0)
     prompts = [torch.randint(0, 50257, (1, 16), generator=g) for _ in range(pedidos)]
     ray.get([r.generar.remote(prompts[0], 1, 0) for r in reps])  # calentamiento
-    pedir_falla.clear()
+    nombres = _nombres_nodos()
+
+    def tirar():
+        ray.kill(reps[1], no_restart=False)  # como una caída del proceso: Ray la recrea
+        emitir("falla", texto="se cayó la réplica 2", nodo_caido=donde[1])
+        return nombres.get(donde[1])
 
     emitir("estado", texto="Midiendo")
     emitir("fase", clave="replicas", texto=f"{pedidos} pedidos a la vez, repartidos entre {n_rep} réplica(s)")
     t0 = time.perf_counter()
     pendientes = {router.atender.remote(x, tokens, i): i for i, x in enumerate(prompts)}
     completados = 0
-    while pendientes:
-        listos, _ = ray.wait(list(pendientes), num_returns=1, timeout=0.3)
-        if pedir_falla.is_set() and n_rep > 1:
-            pedir_falla.clear()
-            emitir("falla", texto="se cayó la réplica 2", nodo_caido=donde[1])
-            ray.kill(reps[1], no_restart=False)  # como una caída del proceso: Ray la recrea
-        for ref in listos:
-            ray.get(ref)
-            pendientes.pop(ref)
-            completados += 1
+    _caer["f"] = tirar if n_rep > 1 else None
+    try:
+        while pendientes:
+            listos, _ = ray.wait(list(pendientes), num_returns=1, timeout=0.3)
+            for ref in listos:
+                ray.get(ref)
+                pendientes.pop(ref)
+                completados += 1
+    finally:
+        _caer["f"] = None
     total = time.perf_counter() - t0
     est = ray.get(router.estadisticas.remote())
     emitir("resumen", fase="replicas", segundos=total, pedidos=pedidos, completados=completados,
@@ -231,18 +242,18 @@ def chat(p, estado):
         liberar(conservar="pipeline")
         e1, e2, _ = _etapas()
         estado.update(fase="generando")
-    pedir_falla.clear()
 
+    def tirar():
+        estado["caida"] = {"palabra": len(estado["palabras"]), "nodo": estado["nodo"], "ts": time.time()}
+        ray.kill(reps[i], no_restart=False)  # la palabra en curso falla y Ray la reintenta en la réplica recreada
+        return estado["nodo"]
+
+    _caer["f"] = tirar if modo == "replicas" else None
     texto_previo = decodificar(tok, ids)
     try:
         for k in range(n):
             t = time.perf_counter()
             if modo == "replicas":
-                if pedir_falla.is_set():
-                    pedir_falla.clear()
-                    estado["caida"] = {"palabra": k, "nodo": estado["nodo"], "ts": time.time()}
-                    ray.kill(reps[i], no_restart=False)  # como una caída del proceso: Ray la recrea
-                    time.sleep(0.5)  # ray.kill es asíncrono: que la caída llegue antes de pedir esta palabra
                 siguiente, nodo = ray.get(reps[i].paso.remote(ids, semilla + k))
                 nodo = nodo.split("/")[0]
                 estado["nodo"] = nodo  # tras una caída, Ray puede recrearla en otro nodo
@@ -257,6 +268,7 @@ def chat(p, estado):
                                        "ms": round((time.perf_counter() - t) * 1000), "ts": time.time()})
             texto_previo = texto
     finally:
+        _caer["f"] = None
         if modo == "replicas":
             router.soltar.remote(i)
     estado["fase"] = "listo"

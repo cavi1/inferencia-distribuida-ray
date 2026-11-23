@@ -121,7 +121,6 @@
   #vistaFrase #cuantas { min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; color: var(--tinta); font-weight: 600; }
   #vistaFrase #caida { margin-left: auto; border: 1px solid var(--alerta); color: var(--alerta); background: transparent; border-radius: 6px; padding: 6px 14px; cursor: pointer; font: inherit; }
   #vistaFrase #caida:disabled { opacity: .35; cursor: default; }
-  #vistaFrase .aviso { color: var(--tenue); font-size: 13px; margin: 0; }
   #vistaFrase #error { display: none; background: var(--alerta-fondo); color: var(--alerta); border-radius: 10px; padding: 10px 14px; }
 
   /* el dibujo va directo sobre el fondo */
@@ -175,7 +174,6 @@
 
   <section id="vistaFrase" hidden>
   <form id="form" autocomplete="off">
-    <p class="aviso" style="color:var(--tinta);font-size:15px">Escribí el comienzo de una frase y mirá cómo el cluster la completa, palabra por palabra.</p>
     <div class="linea-texto">
       <input id="texto" maxlength="200" placeholder="Distributed systems are" aria-label="Comienzo de la frase, en inglés">
       <button id="completar" type="submit">Completar</button>
@@ -185,11 +183,9 @@
         <label><input type="radio" name="modo" value="replicas" checked><span>Réplicas</span></label>
         <label><input type="radio" name="modo" value="pipeline"><span>Pipeline</span></label>
       </div>
-      <span id="explica"></span>
       <div class="cuantas"><button type="button" id="menos" aria-label="Menos palabras">−</button><span id="cuantas">20</span><button type="button" id="mas" aria-label="Más palabras">+</button> palabras</div>
       <button type="button" id="caida" disabled>Simular caída</button>
     </div>
-    <p class="aviso">GPT-2 small (124 M de parámetros, 2019) autocompleta texto en inglés: no responde preguntas. Lo que importa acá es cómo Ray reparte el trabajo.</p>
   </form>
   <div id="error"></div>
 
@@ -459,7 +455,13 @@ function construirControles() {
   cont.querySelectorAll("[data-vel]").forEach((b) => (b.onclick = () => { S.vel = Number(b.dataset.vel); construirControles(); }));
   $("btnEjecutar").onclick = ejecutar;
   $("btnRepetir").onclick = () => { S.tPlay = 0; };
-  if ($("btnFalla")) $("btnFalla").onclick = () => api("/api/falla", {}).catch(mostrarError);
+  if ($("btnFalla")) $("btnFalla").onclick = async () => {
+    const b = $("btnFalla");
+    b.disabled = true; b.textContent = "⚡ Cayendo…";
+    try { S.fallaYa = { nodo: (await api("/api/falla", {})).nodo, hasta: performance.now() + 2500 }; }
+    catch (e) { mostrarError(e); }
+    finally { b.textContent = "⚡ Simular caída"; actualizarBotones(); }
+  };
   actualizarBotones();
 }
 function actualizarBotones() {
@@ -511,7 +513,8 @@ function dibujarEscenario(t) {
     const g = $("nodo_" + n); if (!g) continue;
     const caja = g.querySelector(".caja"), est = g.querySelector(".estado");
     const caido = S.vivos && S.nodos.size && !S.vivos.has(n);
-    const falla = d.fallas.find((f) => f.nodo === n && t >= f.t && t < f.t + 1.2 / Math.max(S.vel, 0.05));
+    const falla = d.fallas.find((f) => f.nodo === n && t >= f.t && t < f.t + 1.2 / Math.max(S.vel, 0.05))
+      || (S.fallaYa && S.fallaYa.nodo === n && performance.now() < S.fallaYa.hasta);  // respuesta inmediata al click
     const lista = activos.get(n);
     if (caido) { caja.setAttribute("stroke", "var(--alerta)"); caja.setAttribute("fill", "var(--alerta-fondo)"); est.textContent = "caído"; }
     else if (falla) { caja.setAttribute("stroke", "var(--alerta)"); caja.setAttribute("fill", "var(--alerta-fondo)"); est.textContent = "se cayó una réplica"; }
