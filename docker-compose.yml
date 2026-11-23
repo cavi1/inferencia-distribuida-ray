@@ -17,10 +17,12 @@ services:
   ray-head:
     <<: *base
     hostname: ray-head
-    command: ["ray", "start", "--head", "--port=6379", "--num-cpus=0",
-              "--resources={\"head\": 1}", "--dashboard-host=0.0.0.0", "--block"]
+    # Arranca el nodo head de Ray y, en el mismo contenedor, el panel web (puerto 8000).
+    command: ["bash", "-c",
+              "ray start --head --port=6379 --num-cpus=0 --resources='{\"head\": 1}' --dashboard-host=0.0.0.0 && exec python src/panel/servidor.py"]
     ports:
-      - "8265:8265"          # dashboard: http://localhost:8265
+      - "8000:8000"          # panel web: http://localhost:8000
+      - "8265:8265"          # dashboard de Ray: http://localhost:8265
 
   ray-worker-1:
     <<: *base

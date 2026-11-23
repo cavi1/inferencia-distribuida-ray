@@ -21,18 +21,21 @@ import ray
 import torch
 
 from cluster import NODOS, conectar, en_nodo, host
+from eventos import tarea
 from modelo import Tramo, cargar_modelo, cargar_tokenizer, codificar, decodificar, generar
 
 
 @ray.remote(num_cpus=1)
 class Etapa:
-    def __init__(self, desde, hasta):
+    def __init__(self, desde, hasta, nombre="etapa"):
         modelo, _ = cargar_modelo()
         self.tramo = Tramo(modelo, desde, hasta)  # el resto del modelo se libera
         self.capas = (desde, hasta)
+        self.nombre = nombre
 
-    def forward(self, x):
-        return self.tramo(x)
+    def forward(self, x, flujo="p", paso=1, rotulo="", clave=None):
+        with tarea(f"{rotulo} · {self.nombre}".strip(" ·"), flujo, paso, clave=clave):
+            return self.tramo(x)
 
     def info(self):
         return f"bloques {self.capas[0]}-{self.capas[1] - 1} en {host()}"
@@ -44,11 +47,18 @@ class ModeloCompleto:
         modelo, _ = cargar_modelo()
         self.tramo = Tramo(modelo, 0, len(modelo.transformer.h))
 
-    def forward(self, x):
-        return self.tramo(x)
+    def forward(self, x, flujo="p", paso=1, rotulo="", clave=None):
+        with tarea(f"{rotulo} · modelo entero".strip(" ·"), flujo, paso, clave=clave):
+            return self.tramo(x)
 
     def info(self):
         return f"modelo entero en {host()}"
+
+
+def pasar_por_pipeline(e1, e2, x, flujo="p", rotulo="", clave=None):
+    """Devuelve la referencia al resultado. La etapa 2 recibe la salida de la 1
+    desde el object store de Ray, sin que los datos pasen por el driver."""
+    return e2.forward.remote(e1.forward.remote(x, flujo, 1, rotulo, clave), flujo, 2, rotulo, clave)
 
 
 def main():
@@ -61,15 +71,15 @@ def main():
 
     conectar()
     tok = cargar_tokenizer()
-    e1 = Etapa.options(**en_nodo(NODOS[0])).remote(0, 6)
-    e2 = Etapa.options(**en_nodo(NODOS[1])).remote(6, 12)
+    e1 = Etapa.options(**en_nodo(NODOS[0])).remote(0, 6, "etapa 1")
+    e2 = Etapa.options(**en_nodo(NODOS[1])).remote(6, 12, "etapa 2")
     completo = ModeloCompleto.options(**en_nodo(NODOS[0])).remote()
     print("\nEtapa 1:", ray.get(e1.info.remote()))
     print("Etapa 2:", ray.get(e2.info.remote()))
     print("Base   :", ray.get(completo.info.remote()))
 
     def paso_pipeline(ids):
-        return ray.get(e2.forward.remote(e1.forward.remote(ids)))  # e1 -> e2 sin pasar por el driver
+        return ray.get(pasar_por_pipeline(e1, e2, ids))  # e1 -> e2 sin pasar por el driver
 
     def paso_completo(ids):
         return ray.get(completo.forward.remote(ids))
@@ -95,12 +105,13 @@ def main():
     t_base = time.perf_counter() - t
 
     t = time.perf_counter()
-    for x in pedidos:  # uno por vez: una etapa siempre está ociosa
-        paso_pipeline(x)
+    for i, x in enumerate(pedidos):  # uno por vez: una etapa siempre está ociosa
+        ray.get(pasar_por_pipeline(e1, e2, x, f"s{i}", f"pedido {i + 1}", i))
     t_seq = time.perf_counter() - t
 
     t = time.perf_counter()
-    ray.get([e2.forward.remote(e1.forward.remote(x)) for x in pedidos])  # todos a la vez: se solapan
+    ray.get([pasar_por_pipeline(e1, e2, x, f"o{i}", f"pedido {i + 1}", i)
+             for i, x in enumerate(pedidos)])  # todos a la vez: se solapan
     t_sol = time.perf_counter() - t
 
     print(f"[3] {a.pedidos} pedidos de {a.largo} tokens:")

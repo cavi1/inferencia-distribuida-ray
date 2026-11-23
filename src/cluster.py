@@ -13,15 +13,28 @@ import socket
 import ray
 
 NODOS = ("nodo_a", "nodo_b")
+NAMESPACE = "inferencia"  # todos los drivers comparten namespace para ver el actor "bus"
+SRC = os.path.dirname(os.path.abspath(__file__))
 
 
-def conectar():
+def _runtime_env(eventos):
+    # Los workers tienen que poder importar los módulos de src/ (modelo, eventos, demos...).
+    # EVENTOS=0 apaga la publicación de eventos al panel: así las demos por consola
+    # miden tiempos sin ningún costo extra.
+    return {"env_vars": {"PYTHONPATH": SRC + os.pathsep + os.environ.get("PYTHONPATH", ""),
+                         "EVENTOS": "1" if eventos else "0"}}
+
+
+def conectar(eventos=False):
+    os.environ["EVENTOS"] = "1" if eventos else "0"
     direccion = os.environ.get("CLUSTER_RAY")
     if direccion:
-        ray.init(address=direccion)
+        ray.init(address=direccion, namespace=NAMESPACE, runtime_env=_runtime_env(eventos))
         modo = "cluster"
     else:
         ray.init(
+            namespace=NAMESPACE,
+            runtime_env=_runtime_env(eventos),
             num_cpus=4,
             resources={"head": 1, "nodo_a": 1, "nodo_b": 1},
             include_dashboard=False,

@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inferencia distribuida con Ray · panel</title>
+<style>
+  :root {
+    --fondo: #f6f7f9; --tarjeta: #ffffff; --tinta: #1b2330; --tenue: #5d6878; --linea: #d5dae2;
+    --acento: #2b6cb0; --acento-fondo: #e3eefb; --alerta: #c0392b; --alerta-fondo: #fbe9e7; --ok: #2f855a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #12161c; --tarjeta: #1b212a; --tinta: #e8ecf2; --tenue: #9aa5b5; --linea: #343c48;
+      --acento: #63a4ec; --acento-fondo: #1d3350; --alerta: #ff7b6b; --alerta-fondo: #3b1f1c; --ok: #5fc08b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--tinta); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 2px; }
+  .sub { color: var(--tenue); margin: 0 0 16px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+  #pestanas { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  #pestanas button { border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta); padding: 8px 14px; border-radius: 999px; cursor: pointer; font: inherit; }
+  #pestanas button.activa { background: var(--acento); border-color: var(--acento); color: #fff; }
+  #controles { display: flex; gap: 14px 18px; flex-wrap: wrap; align-items: end; }
+  #controles label { display: flex; flex-direction: column; font-size: 13px; color: var(--tenue); gap: 3px; }
+  #controles select, #controles input { font: inherit; padding: 6px 8px; border: 1px solid var(--linea); border-radius: 8px; background: var(--fondo); color: var(--tinta); }
+  #controles input { width: 84px; }
+  .botones { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+  .botones button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta); cursor: pointer; }
+  .botones button.principal { background: var(--acento); border-color: var(--acento); color: #fff; }
+  .botones button.peligro { border-color: var(--alerta); color: var(--alerta); }
+  .botones button:disabled { opacity: .45; cursor: not-allowed; }
+  #queMirar { margin: 0 0 12px; color: var(--tenue); }
+  #banner { display: none; background: var(--alerta-fondo); color: var(--alerta); border: 1px solid var(--alerta); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; white-space: pre-wrap; }
+  #ahora { min-height: 24px; font-weight: 600; margin: 4px 2px 10px; }
+  #ahora .pequeno { font-weight: 400; color: var(--tenue); }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { font-family: inherit; fill: var(--tinta); }
+  .tenue { fill: var(--tenue) !important; }
+  #resultados { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+  .res { border: 1px solid var(--linea); border-radius: 10px; padding: 10px 12px; }
+  .res .n { font-size: 12px; color: var(--tenue); }
+  .res .v { font-size: 22px; font-weight: 650; }
+  .res.destacado { border-color: var(--acento); background: var(--acento-fondo); }
+  #conclusion { margin: 10px 2px 0; font-weight: 600; }
+  details { color: var(--tenue); }
+  details p { margin: 8px 0; }
+  footer { color: var(--tenue); font-size: 13px; margin-top: 18px; }
+  a { color: var(--acento); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Inferencia distribuida con Ray</h1>
+  <p class="sub">Un modelo de lenguaje repartido entre los nodos de un cluster: mirá qué calcula cada nodo, cuándo se pasan datos y cuánto se espera.</p>
+
+  <div id="pestanas" role="tablist"></div>
+  <div class="tarjeta">
+    <p id="queMirar"></p>
+    <div id="controles"></div>
+  </div>
+  <div id="banner"></div>
+
+  <div class="tarjeta">
+    <div id="ahora"></div>
+    <svg id="escenario" viewBox="0 0 1100 340" role="img" aria-label="Cluster: head y dos nodos, con los datos viajando entre ellos"></svg>
+  </div>
+  <div class="tarjeta">
+    <div style="font-weight:600;margin-bottom:6px">Línea de tiempo por nodo <span class="pequeno tenue" id="leyendaColor" style="font-weight:400"></span></div>
+    <svg id="tiempo" viewBox="0 0 1100 250" role="img" aria-label="Línea de tiempo: qué hizo cada nodo y cuándo"></svg>
+  </div>
+  <div class="tarjeta">
+    <div id="resultados"></div>
+    <div id="conclusion"></div>
+  </div>
+
+  <details class="tarjeta">
+    <summary>Cómo leer este panel</summary>
+    <p><b>Arriba</b> está el cluster: el <i>head</i> coordina (reparte y junta resultados) y los nodos A y B hacen el cálculo. Un nodo se ilumina mientras trabaja y cada círculo que viaja entre nodos es un dato (por ejemplo, el resultado de una capa) que se manda por la red.</p>
+    <p><b>Abajo</b> está la línea de tiempo: una fila por nodo, una barra por cada tramo de trabajo. Los <b>huecos</b> entre barras son tiempo de espera y comunicación. Cuantos más huecos, menos conviene ese reparto.</p>
+    <p>Los eventos se miden en cada proceso con su reloj. Al correr en Docker, los contenedores comparten el reloj del equipo, así que se pueden ordenar entre sí. En un cluster real habría que sincronizar los relojes.</p>
+    <p>Con la velocidad en cámara lenta se puede ver lo que dura milisegundos. Las mediciones de tiempo se hicieron a velocidad real: la cámara lenta solo cambia cómo se reproduce.</p>
+  </details>
+  <footer>Dashboard propio de Ray: <a id="enlaceRay" href="#" target="_blank" rel="noopener">puerto 8265</a></footer>
+</main>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- configuración
+const DEMOS = {
+  tensores: {
+    nombre: "1 · Tensores",
+    mirar: "Cada matriz se corta en dos mitades, una por nodo. Después de cada capa los nodos tienen que juntar sus resultados antes de seguir: mirá los huecos entre capas en la línea de tiempo.",
+    velocidad: 0.05,
+    color: "capa",
+    params: [
+      { id: "n", etiqueta: "Tamaño de la matriz", tipo: "select", opciones: [[256, "256 (muy chica)"], [512, "512"], [1024, "1024"], [2048, "2048"], [4096, "4096 (más lenta)"]], defecto: 1024 },
+      { id: "capas", etiqueta: "Capas", tipo: "numero", min: 2, max: 16, defecto: 8 },
+    ],
+  },
+  pipeline: {
+    nombre: "2 · Pipeline",
+    mirar: "El modelo se corta por capas: el nodo A hace la primera mitad y el B la segunda. Cada pedido tiene su color. En la última fase, mientras B termina un pedido, A ya empieza el siguiente.",
+    velocidad: 0.5,
+    color: "pedido",
+    params: [{ id: "pedidos", etiqueta: "Pedidos", tipo: "numero", min: 2, max: 16, defecto: 6 }],
+  },
+  replicas: {
+    nombre: "3 · Réplicas",
+    mirar: "Cada nodo tiene una copia completa del modelo y el head reparte los pedidos. Apretá «Simular caída» durante la ejecución: la réplica se recrea y ningún pedido se pierde.",
+    velocidad: 1,
+    color: "pedido",
+    params: [
+      { id: "pedidos", etiqueta: "Pedidos", tipo: "numero", min: 4, max: 40, defecto: 16 },
+      { id: "tokens", etiqueta: "Palabras a generar", tipo: "numero", min: 1, max: 30, defecto: 8 },
+    ],
+  },
+};
+const VELOCIDADES = [[1, "Tiempo real"], [0.5, "× 1/2"], [0.2, "× 1/5"], [0.1, "× 1/10"], [0.05, "× 1/20"], [0.02, "× 1/50"]];
+const ORDEN_NODOS = ["ray-head", "nodo-a", "nodo-b"];
+const ROL = { "ray-head": "head · coordina", "nodo-a": "worker A", "nodo-b": "worker B" };
+const PALETA = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2", "#eeca3b", "#9d755d", "#7f8fa6", "#ff9da6"];
+const TEXTO_OSCURO = new Set([4, 6, 9]);
+const POS = { "ray-head": { x: 550, y: 66, w: 320, h: 92 }, "nodo-a": { x: 215, y: 262, w: 300, h: 100 }, "nodo-b": { x: 885, y: 262, w: 300, h: 100 } };
+const MIN_PAQUETE = 0.004;
+
+const $ = (id) => document.getElementById(id);
+const S = {
+  demo: "tensores", pos: 0, eventos: [], nodos: new Map(), corriendo: false, offsetServidor: 0,
+  d: null, tPlay: 0, vel: 0.05, ultimo: 0, tope: null, params: {},
+};
+
+// ---------------------------------------------------------------- utilidades
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function fmtTiempo(s) {
+  if (s < 1) return (s * 1000).toFixed(s < 0.01 ? 1 : 0) + " ms";
+  return s.toFixed(s < 10 ? 2 : 1) + " s";
+}
+function colorDe(clave) {
+  if (clave === null || clave === undefined) return { fondo: "#9aa5b5", texto: "#111" };
+  const i = ((clave % PALETA.length) + PALETA.length) % PALETA.length;
+  return { fondo: PALETA[i], texto: TEXTO_OSCURO.has(i) ? "#111" : "#fff" };
+}
+function nombreNodo(id) {
+  const n = S.nodos.get(id);
+  return n ? n.nombre : null;
+}
+function ahoraServidor() { return performance.now() / 1000 + S.offsetServidor; }
+
+// ---------------------------------------------------------------- datos derivados
+function derivar() {
+  const ini = S.eventos.find((e) => e.tipo === "inicio");
+  if (ini && ini.demo !== S.demo) { S.d = vacio(); return; }  // los eventos son de otra demo
+  const ev = S.eventos;
+  const primeraFase = ev.find((e) => e.tipo === "fase");
+  const d = { tCero: null, fases: [], spans: [], transf: [], fallas: [], marcas: [], terminados: [], resumenes: {}, comparacion: null,
+              estado: "", error: null, fin: ev.some((e) => e.tipo === "fin"), fin_t: null, sinNombre: false };
+  for (const e of ev) {
+    if (e.tipo === "estado") d.estado = e.texto;
+    if (e.tipo === "error") d.error = e.texto;
+  }
+  if (!primeraFase) { S.d = d; return; }
+  const t0 = primeraFase.ts;
+  d.tCero = t0;
+  for (const e of ev) {
+    if (e.tipo === "fase") d.fases.push({ clave: e.clave, texto: e.texto, t0: e.ts - t0, t1: null });
+    else if (e.tipo === "falla") d.fallas.push({ t: e.ts - t0, nodo: nombreNodo(e.nodo_caido), texto: e.texto });
+    else if (e.tipo === "evento" && e.ts - t0 > 0) d.marcas.push({ t: e.ts - t0, nodo: nombreNodo(e.nodo), texto: e.texto });
+    else if (e.tipo === "pedido_fin") d.terminados.push({ t: e.ts - t0, latencia: e.latencia, pedido: e.pedido });
+    else if (e.tipo === "resumen") {
+      if (e.fase === "comparacion") d.comparacion = e; else d.resumenes[e.fase] = { ...e, t: e.ts - t0 };
+    } else if (e.tipo === "fin") d.fin_t = e.ts - t0;
+    else if (e.tipo === "tarea" && !String(e.flujo).startsWith("calentar") && e.t1 - t0 > -0.001) {
+      const nombre = nombreNodo(e.nodo);
+      if (!nombre) { d.sinNombre = true; continue; }
+      d.spans.push({ nodo: nombre, t0: Math.max(0, e.t0 - t0), t1: e.t1 - t0, texto: e.texto, flujo: e.flujo, paso: e.paso, clave: e.clave });
+    }
+  }
+  d.spans.sort((a, b) => a.t0 - b.t0);
+  d.fallas.sort((a, b) => a.t - b.t);
+  d.fases.sort((a, b) => a.t0 - b.t0);
+  d.fases.forEach((f, i) => {
+    const sig = d.fases[i + 1];
+    f.t1 = sig ? sig.t0 : (d.resumenes[f.clave] ? d.resumenes[f.clave].t : null);
+  });
+  // transferencias: entre pasos consecutivos de un mismo flujo que ocurren en nodos distintos
+  const porFlujo = new Map();
+  for (const s of d.spans) {
+    if (!porFlujo.has(s.flujo)) porFlujo.set(s.flujo, new Map());
+    const m = porFlujo.get(s.flujo);
+    if (!m.has(s.paso)) m.set(s.paso, []);
+    m.get(s.paso).push(s);
+  }
+  for (const pasos of porFlujo.values()) {
+    for (const [paso, lista] of pasos) {
+      const previos = pasos.get(paso - 1);
+      if (!previos) continue;
+      for (const b of lista) for (const a of previos) {
+        if (a.nodo === b.nodo) continue;
+        d.transf.push({ de: a.nodo, a: b.nodo, t0: a.t1, t1: Math.max(b.t0, a.t1 + MIN_PAQUETE), clave: b.clave, a_span: a, b_span: b });
+      }
+    }
+  }
+  d.fin_datos = Math.max(0, ...d.spans.map((s) => s.t1), ...d.fases.map((f) => f.t1 || 0));
+  S.d = d;
+}
+
+// ---------------------------------------------------------------- red
+async function api(ruta, cuerpo) {
+  const r = await fetch(ruta, cuerpo === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) });
+  if (!r.ok) {
+    let msg = r.statusText;
+    try { msg = (await r.json()).detail || msg; } catch (_) {}
+    throw new Error(msg);
+  }
+  return r.json();
+}
+async function sondear() {
+  try {
+    const r = await api(`/api/eventos?desde=${S.pos}`);
+    S.offsetServidor = r.ahora - performance.now() / 1000;
+    S.corriendo = r.corriendo;
+    if (r.siguiente < S.pos) { S.pos = 0; S.eventos = []; }
+    if (r.eventos.length) { S.eventos.push(...r.eventos); S.pos = r.siguiente; derivar(); }
+    else if (!S.d) derivar();
+    S.demoServidor = r.demo;
+  } catch (e) { /* el servidor puede estar ocupado; se reintenta */ }
+  actualizarBotones();
+  setTimeout(sondear, 250);
+}
+async function sondearNodos() {
+  try {
+    const lista = await api("/api/nodos");
+    S.nodos = new Map(lista.map((n) => [n.id, n]));
+    S.vivos = new Map();
+    for (const n of lista) if (n.vivo) S.vivos.set(n.nombre, true);
+    if (S.d) derivar();
+  } catch (_) {}
+  setTimeout(sondearNodos, 2000);
+}
+
+// ---------------------------------------------------------------- interfaz
+function construirPestanas() {
+  const cont = $("pestanas");
+  cont.innerHTML = "";
+  for (const [id, d] of Object.entries(DEMOS)) {
+    const b = document.createElement("button");
+    b.textContent = d.nombre; b.className = id === S.demo ? "activa" : "";
+    b.onclick = () => { if (S.corriendo) return; elegirDemo(id); };
+    cont.appendChild(b);
+  }
+}
+function elegirDemo(id) {
+  S.demo = id; S.vel = DEMOS[id].velocidad; S.tPlay = 0;
+  derivar();  // si el servidor todavía tiene los eventos de esta demo, se vuelven a mostrar
+  construirPestanas(); construirControles();
+  $("queMirar").textContent = DEMOS[id].mirar;
+  $("leyendaColor").textContent = DEMOS[id].color === "capa" ? "· cada color es una capa del modelo" : "· cada color es un pedido";
+  $("banner").style.display = "none";
+}
+function vacio() { return { fases: [], spans: [], transf: [], fallas: [], marcas: [], terminados: [], resumenes: {}, comparacion: null, estado: "", error: null, fin: false, tCero: null, fin_datos: 0 }; }
+function derivarVacio() { S.eventos = []; S.d = vacio(); }
+function construirControles() {
+  const cont = $("controles");
+  const demo = DEMOS[S.demo];
+  let html = "";
+  for (const p of demo.params) {
+    const val = S.params[S.demo + "." + p.id] ?? p.defecto;
+    if (p.tipo === "select") {
+      html += `<label>${p.etiqueta}<select id="p_${p.id}">${p.opciones.map(([v, t]) => `<option value="${v}" ${String(v) === String(val) ? "selected" : ""}>${t}</option>`).join("")}</select></label>`;
+    } else {
+      html += `<label>${p.etiqueta}<input id="p_${p.id}" type="number" min="${p.min}" max="${p.max}" value="${val}"></label>`;
+    }
+  }
+  html += `<label>Velocidad<select id="velocidad">${VELOCIDADES.map(([v, t]) => `<option value="${v}" ${v === S.vel ? "selected" : ""}>${t}</option>`).join("")}</select></label>`;
+  html += `<div class="botones">
+    <button id="btnEjecutar" class="principal">▶ Ejecutar</button>
+    <button id="btnRepetir">↺ Ver de nuevo</button>
+    ${S.demo === "replicas" ? '<button id="btnFalla" class="peligro">⚡ Simular caída</button>' : ""}
+  </div>`;
+  cont.innerHTML = html;
+  $("velocidad").onchange = (e) => { S.vel = parseFloat(e.target.value); };
+  $("btnEjecutar").onclick = ejecutar;
+  $("btnRepetir").onclick = () => { S.tPlay = 0; };
+  if ($("btnFalla")) $("btnFalla").onclick = () => api("/api/falla", {}).catch(mostrarError);
+  for (const p of demo.params) $("p_" + p.id).onchange = (e) => { S.params[S.demo + "." + p.id] = e.target.value; };
+  actualizarBotones();
+}
+function actualizarBotones() {
+  const hay = S.d && S.d.spans.length > 0;
+  if ($("btnEjecutar")) $("btnEjecutar").disabled = S.corriendo;
+  if ($("btnRepetir")) $("btnRepetir").disabled = !hay || S.corriendo;
+  if ($("btnFalla")) $("btnFalla").disabled = !S.corriendo || !(S.d && S.d.fases.length);
+  document.querySelectorAll("#pestanas button").forEach((b) => (b.disabled = S.corriendo));
+}
+function mostrarError(e) {
+  const b = $("banner"); b.style.display = "block"; b.textContent = e.message || String(e);
+}
+async function ejecutar() {
+  const cuerpo = { demo: S.demo };
+  for (const p of DEMOS[S.demo].params) cuerpo[p.id] = parseInt($("p_" + p.id).value, 10);
+  $("banner").style.display = "none";
+  try {
+    await api("/api/ejecutar", cuerpo);
+    S.eventos = []; S.pos = 0; S.tPlay = 0; derivarVacio(); S.corriendo = true; actualizarBotones();
+  } catch (e) { mostrarError(e); }
+}
+
+// ---------------------------------------------------------------- dibujo: escenario
+function construirEscenario() {
+  const svg = $("escenario");
+  let h = `<defs><marker id="punta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--linea)"/></marker></defs>`;
+  const c = (n) => POS[n];
+  const enlaces = [["ray-head", "nodo-a"], ["ray-head", "nodo-b"], ["nodo-a", "nodo-b"]];
+  h += `<g id="enlaces">` + enlaces.map(([a, b]) => `<line x1="${c(a).x}" y1="${c(a).y}" x2="${c(b).x}" y2="${c(b).y}" stroke="var(--linea)" stroke-width="2" stroke-dasharray="6 6"/>`).join("") + `</g>`;
+  for (const n of ORDEN_NODOS) {
+    const p = c(n);
+    h += `<g id="nodo_${n}"><rect class="caja" x="${p.x - p.w / 2}" y="${p.y - p.h / 2}" width="${p.w}" height="${p.h}" rx="12" fill="var(--tarjeta)" stroke="var(--linea)" stroke-width="2"/>
+      <text x="${p.x}" y="${p.y - p.h / 2 + 28}" text-anchor="middle" font-size="18" font-weight="650">${n}</text>
+      <text class="tenue" x="${p.x}" y="${p.y - p.h / 2 + 48}" text-anchor="middle" font-size="12.5">${ROL[n]}</text>
+      <text class="estado" x="${p.x}" y="${p.y + p.h / 2 - 16}" text-anchor="middle" font-size="14">esperando</text></g>`;
+  }
+  h += `<g id="paquetes"></g>`;
+  svg.innerHTML = h;
+}
+function dibujarEscenario(t) {
+  const d = S.d;
+  const activos = new Map();
+  for (const s of d.spans) {
+    if (s.t0 > t) break;
+    if (t <= s.t1 + 0.004) { if (!activos.has(s.nodo)) activos.set(s.nodo, []); activos.get(s.nodo).push(s); }
+  }
+  for (const n of ORDEN_NODOS) {
+    const g = $("nodo_" + n); if (!g) continue;
+    const caja = g.querySelector(".caja"), est = g.querySelector(".estado");
+    const caido = S.vivos && S.nodos.size && !S.vivos.has(n);
+    const falla = d.fallas.find((f) => f.nodo === n && t >= f.t && t < f.t + 1.2 / Math.max(S.vel, 0.05));
+    const lista = activos.get(n);
+    if (caido) { caja.setAttribute("stroke", "var(--alerta)"); caja.setAttribute("fill", "var(--alerta-fondo)"); est.textContent = "caído"; }
+    else if (falla) { caja.setAttribute("stroke", "var(--alerta)"); caja.setAttribute("fill", "var(--alerta-fondo)"); est.textContent = "se cayó una réplica"; }
+    else if (lista) {
+      caja.setAttribute("stroke", "var(--acento)"); caja.setAttribute("fill", "var(--acento-fondo)");
+      const textos = [...new Set(lista.map((s) => s.texto))];
+      est.textContent = (n === "ray-head" ? "coordinando: " : "calculando: ") + (textos.length > 2 ? textos.slice(0, 2).join(", ") + "…" : textos.join(", "));
+    } else { caja.setAttribute("stroke", "var(--linea)"); caja.setAttribute("fill", "var(--tarjeta)"); est.textContent = "esperando"; }
+  }
+  let paq = "";
+  for (const x of d.transf) {
+    if (t < x.t0 || t > x.t1) continue;
+    const a = POS[x.de], b = POS[x.a]; if (!a || !b) continue;
+    const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
+    const rec = 74, p = (t - x.t0) / (x.t1 - x.t0);
+    const px = a.x + ux * rec + (dx - ux * rec * 2) * p, py = a.y + uy * rec + (dy - uy * rec * 2) * p;
+    const col = colorDe(x.clave).fondo;
+    paq += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="10" fill="${col}" stroke="var(--tinta)" stroke-width="1.5"/>`;
+  }
+  $("paquetes").innerHTML = paq;
+}
+
+// ---------------------------------------------------------------- dibujo: línea de tiempo
+function pasoNice(rango, n) {
+  const bruto = rango / n, p = Math.pow(10, Math.floor(Math.log10(bruto))), m = bruto / p;
+  return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p;
+}
+function dibujarTiempo(t) {
+  const d = S.d, svg = $("tiempo");
+  const ML = 92, MR = 20, MT = 30, FILA = 50, ancho = 1100 - ML - MR;
+  const filas = ORDEN_NODOS;
+  const hayMarcas = d.fallas.length > 0 || d.marcas.length > 0;
+  const H = MT + filas.length * FILA + 34 + (hayMarcas ? 38 : 0);
+  svg.setAttribute("viewBox", `0 0 1100 ${H}`);
+  if (!d.fases.length) {
+    svg.innerHTML = `<text class="tenue" x="550" y="${H / 2}" text-anchor="middle" font-size="14">${d.fin ? "" : "Todavía no hay datos: apretá «Ejecutar»."}</text>`;
+    return;
+  }
+  const dominio = Math.max(d.fin ? d.fin_datos : Math.max(d.fin_datos, t) * 1.08, 0.05);
+  const X = (s) => ML + (s / dominio) * ancho;
+  let h = "";
+  d.fases.forEach((f, i) => {
+    const x0 = X(f.t0), x1 = X(f.t1 === null ? Math.max(dominio, f.t0) : f.t1);
+    h += `<rect x="${x0.toFixed(1)}" y="${MT - 4}" width="${Math.max(0, x1 - x0).toFixed(1)}" height="${filas.length * FILA + 4}" fill="${i % 2 ? "var(--acento-fondo)" : "none"}" opacity="0.55"/>`;
+    h += `<text class="tenue" x="${(x0 + 4).toFixed(1)}" y="${MT - 10}" font-size="12">${esc(f.texto.length > 62 ? f.texto.slice(0, 60) + "…" : f.texto)}</text>`;
+  });
+  filas.forEach((n, i) => {
+    const y = MT + i * FILA;
+    h += `<line x1="${ML}" y1="${y + FILA}" x2="${ML + ancho}" y2="${y + FILA}" stroke="var(--linea)"/>`;
+    h += `<text x="${ML - 10}" y="${y + FILA / 2 + 5}" text-anchor="end" font-size="13" font-weight="600">${n}</text>`;
+  });
+  // eje
+  const paso = pasoNice(dominio, 6), yEje = MT + filas.length * FILA;
+  const unidad = dominio < 1 ? 1000 : 1, sufijo = dominio < 1 ? " ms" : " s";
+  for (let v = 0; v <= dominio + 1e-9; v += paso) {
+    const x = X(v);
+    h += `<line x1="${x.toFixed(1)}" y1="${MT - 2}" x2="${x.toFixed(1)}" y2="${yEje}" stroke="var(--linea)" stroke-dasharray="2 4"/>`;
+    h += `<text class="tenue" x="${x.toFixed(1)}" y="${yEje + 18}" text-anchor="middle" font-size="12">${(v * unidad).toFixed(unidad === 1000 ? 0 : 1).replace(/\.0$/, "")}${sufijo}</text>`;
+  }
+  // conexiones entre pasos
+  for (const x of d.transf) {
+    if (t < x.b_span.t0 || x.b_span.t0 - x.a_span.t1 > 0.12 * dominio) continue;  // no dibujar esperas largas en cola
+    const ya = MT + ORDEN_NODOS.indexOf(x.de) * FILA + FILA / 2, yb = MT + ORDEN_NODOS.indexOf(x.a) * FILA + FILA / 2;
+    h += `<line x1="${X(Math.min(x.a_span.t1, t)).toFixed(1)}" y1="${ya}" x2="${X(Math.min(x.b_span.t0, t)).toFixed(1)}" y2="${yb}" stroke="var(--tenue)" stroke-width="1" opacity="0.45"/>`;
+  }
+  // barras
+  for (const s of d.spans) {
+    if (s.t0 > t) break;
+    const fi = ORDEN_NODOS.indexOf(s.nodo); if (fi < 0) continue;
+    const x0 = X(s.t0), x1 = X(Math.min(s.t1, t)), w = Math.max(2, x1 - x0), y = MT + fi * FILA + 9, c = colorDe(s.clave);
+    h += `<g><title>${esc(s.texto)} · ${fmtTiempo(s.t1 - s.t0)}</title><rect x="${x0.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="${FILA - 18}" rx="4" fill="${c.fondo}" stroke="var(--tinta)" stroke-opacity="0.35"/>`;
+    const corto = s.texto.replace(/^pedido (\d+)/, "p$1").replace(/^capa (\d+)/, "c$1").replace("modelo entero", "entero");
+    const rotulo = [s.texto, corto, corto.split(" ")[0]].find((r) => r.length * 6.3 + 8 <= w);
+    if (rotulo) h += `<text x="${(x0 + w / 2).toFixed(1)}" y="${y + (FILA - 18) / 2 + 4}" text-anchor="middle" font-size="11" style="fill:${c.texto}">${esc(rotulo)}</text>`;
+    h += `</g>`;
+  }
+  // fallas y recuperaciones: línea en la fila del nodo y rótulo debajo del eje
+  const marcas = [
+    ...d.fallas.map((f) => ({ t: f.t, nodo: f.nodo, color: "var(--alerta)", texto: `⚡ ${f.texto}${f.nodo ? " (" + f.nodo + ")" : ""}` })),
+    ...d.marcas.map((m) => ({ t: m.t, nodo: m.nodo, color: "var(--ok)", texto: `↻ ${m.texto}${m.nodo ? " en " + m.nodo : ""}` })),
+  ].sort((a, b) => a.t - b.t);
+  const finFila = [-1e9, -1e9];
+  for (const m of marcas) {
+    if (t < m.t) continue;
+    const x = X(m.t), fi = Math.max(0, ORDEN_NODOS.indexOf(m.nodo)), largo = m.texto.length * 6.6 + 8;
+    const fila = x - finFila[0] > 0 ? 0 : x - finFila[1] > 0 ? 1 : 0;
+    finFila[fila] = x + largo;
+    const yTexto = yEje + 38 + fila * 16;
+    h += `<line x1="${x.toFixed(1)}" y1="${MT + fi * FILA}" x2="${x.toFixed(1)}" y2="${MT + (fi + 1) * FILA}" stroke="${m.color}" stroke-width="2.5"/>`;
+    h += `<line x1="${x.toFixed(1)}" y1="${yEje}" x2="${x.toFixed(1)}" y2="${yTexto - 12}" stroke="${m.color}" stroke-width="1" stroke-dasharray="3 3"/>`;
+    h += `<text x="${(x + 4).toFixed(1)}" y="${yTexto}" font-size="12" font-weight="650" style="fill:${m.color}">${esc(m.texto)}</text>`;
+  }
+  // cabezal
+  const xt = X(Math.min(t, dominio));
+  h += `<line x1="${xt.toFixed(1)}" y1="${MT - 4}" x2="${xt.toFixed(1)}" y2="${yEje}" stroke="var(--acento)" stroke-width="2"/>`;
+  svg.innerHTML = h;
+}
+
+// ---------------------------------------------------------------- resultados y estado
+const ETIQUETA_FASE = { local: "Un solo nodo", dist: "Dos nodos", entero: "Modelo entero, un nodo", seq: "Pipeline, de a un pedido", solapado: "Pipeline, pedidos a la vez", replicas: "Réplicas" };
+function dibujarResultados(t) {
+  const d = S.d;
+  let h = "";
+  for (const f of d.fases) {
+    const r = d.resumenes[f.clave];
+    if (!r || t < r.t - (S.vel < 1 ? 0 : 0.0)) continue;
+    if (f.t1 !== null && t < f.t1) continue;
+    let valor = fmtTiempo(r.segundos), extra = "";
+    if (r.pedidos && f.clave !== "replicas") extra = `${(r.pedidos / r.segundos).toFixed(2)} pedidos/s`;
+    if (f.clave === "replicas") { valor = `${r.por_segundo.toFixed(2)} pedidos/s`; extra = `${r.completados} de ${r.pedidos} completados · latencia p95 ${fmtTiempo(r.lat_p95)}`; }
+    h += `<div class="res"><div class="n">${ETIQUETA_FASE[f.clave] || esc(f.texto)}</div><div class="v">${valor}</div><div class="n">${extra}</div></div>`;
+  }
+  const c = d.comparacion;
+  let concl = "";
+  const fin = d.fases.length && d.fases.every((f) => f.t1 !== null && t >= f.t1);
+  if (c && fin) {
+    if (c.relacion) h += `<div class="res destacado"><div class="n">${S.demo === "tensores" ? "Distribuido / un nodo" : "Mejora del solapamiento"}</div><div class="v">${c.relacion.toFixed(2)}×</div><div class="n">${S.demo === "tensores" ? "mayor que 1: distribuir fue más lento" : "mayor que 1: el pipeline ganó"}</div></div>`;
+    concl = c.texto;
+  }
+  $("resultados").innerHTML = h || `<div class="n tenue">Los resultados aparecen cuando termina cada fase.</div>`;
+  $("conclusion").textContent = concl;
+}
+function dibujarAhora(t) {
+  const d = S.d, el = $("ahora");
+  if (d.error) { $("banner").style.display = "block"; $("banner").textContent = d.error; }
+  if (!d.fases.length) {
+    el.innerHTML = S.corriendo ? `Preparando… <span class="pequeno">${esc(d.estado || "")}</span>` : `<span class="pequeno">Elegí los parámetros y apretá «Ejecutar».</span>`;
+    return;
+  }
+  const f = d.fases.filter((x) => x.t0 <= t).pop();
+  let extra = "";
+  if (S.demo === "replicas") {
+    const ok = d.terminados.filter((x) => x.t <= t).length;
+    extra = ` <span class="pequeno">· pedidos terminados: ${ok}</span>`;
+  }
+  el.innerHTML = `${f ? esc(f.texto) : ""}${extra} <span class="pequeno">· t = ${fmtTiempo(Math.max(0, t))}</span>`;
+}
+
+// ---------------------------------------------------------------- bucle de reproducción
+function cuadro(ahora) {
+  const dt = Math.min(0.1, (ahora - S.ultimo) / 1000); S.ultimo = ahora;
+  const d = S.d;
+  if (d && d.tCero !== null) {
+    let tope = d.fin ? Infinity : ahoraServidor() - d.tCero - 0.6;
+    if (S.parar !== undefined) tope = Math.min(tope, S.parar);
+    S.tPlay = Math.min(S.tPlay + dt * S.vel, Math.max(0, tope));
+    const fin = d.fin ? d.fin_datos : Infinity;
+    if (S.tPlay > fin) S.tPlay = fin;
+    const terminado = d.fin && S.tPlay >= d.fin_datos - 1e-9;
+    dibujarEscenario(terminado ? 1e9 : S.tPlay); dibujarTiempo(S.tPlay); dibujarResultados(S.tPlay); dibujarAhora(S.tPlay);
+  } else if (d) {
+    dibujarEscenario(-1); dibujarTiempo(0); dibujarResultados(-1); dibujarAhora(0);
+  }
+  requestAnimationFrame(cuadro);
+}
+
+// ---------------------------------------------------------------- inicio
+(function iniciar() {
+  const q = new URLSearchParams(location.search);
+  S.demo = DEMOS[q.get("demo")] ? q.get("demo") : "tensores";
+  S.vel = q.get("vel") ? parseFloat(q.get("vel")) : DEMOS[S.demo].velocidad;
+  if (q.get("parar")) S.parar = parseFloat(q.get("parar"));
+  $("enlaceRay").href = `${location.protocol}//${location.hostname}:8265`;
+  construirPestanas(); derivarVacio(); construirControles(); construirEscenario();
+  $("queMirar").textContent = DEMOS[S.demo].mirar;
+  $("leyendaColor").textContent = DEMOS[S.demo].color === "capa" ? "· cada color es una capa del modelo" : "· cada color es un pedido";
+  sondearNodos().then(() => {});
+  sondear();
+  if (q.get("auto")) setTimeout(ejecutar, 800);
+  requestAnimationFrame((t) => { S.ultimo = t; cuadro(t); });
+})();
+</script>
+</body>
+</html>

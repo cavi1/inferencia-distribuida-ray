@@ -19,6 +19,7 @@ import numpy as np
 import ray
 
 from cluster import NODOS, conectar, en_nodo, host
+from eventos import instante, tarea
 
 
 @ray.remote(num_cpus=1)
@@ -31,17 +32,30 @@ class Fragmento:
             W = rng.standard_normal((n, n), dtype=np.float32) / np.sqrt(n)
             self.W.append(np.ascontiguousarray(W[:, columnas]))
 
-    def multiplicar(self, x, capa):
-        return x @ self.W[capa]
+    def multiplicar(self, x, capa, flujo="dist", paso=0):
+        with tarea(f"capa {capa + 1}", flujo, paso, clave=capa):
+            return x @ self.W[capa]
 
-    def ejecutar_todo(self, x):
+    def ejecutar_todo(self, x, flujo="local"):
         """Solo tiene sentido con k=1: todas las capas en el mismo proceso."""
-        for W in self.W:
-            x = np.tanh(x @ W)
+        for c, W in enumerate(self.W):
+            with tarea(f"capa {c + 1}", flujo, c, clave=c):
+                x = np.tanh(x @ W)
         return x
 
     def nodo(self):
         return host()
+
+
+def ejecutar_distribuido(frags, x0, capas, flujo="dist"):
+    """Una pasada por todas las capas con las matrices repartidas entre `frags`."""
+    instante("enviar lote", flujo, 0)
+    x = x0
+    for c in range(capas):
+        partes = ray.get([f.multiplicar.remote(x, c, flujo, 2 * c + 1) for f in frags])
+        with tarea("juntar", flujo, 2 * c + 2, clave=c):
+            x = np.tanh(np.concatenate(partes, axis=1))
+    return x
 
 
 def medir(n, capas, lote, k, repeticiones=3):
@@ -51,20 +65,13 @@ def medir(n, capas, lote, k, repeticiones=3):
     frags = [Fragmento.options(**en_nodo(NODOS[i % len(NODOS)])).remote(n, capas, k, i) for i in range(k)]
     ubicacion = ray.get([f.nodo.remote() for f in frags])
 
-    def distribuido():
-        x = x0
-        for c in range(capas):
-            partes = ray.get([f.multiplicar.remote(x, c) for f in frags])
-            x = np.tanh(np.concatenate(partes, axis=1))
-        return x
-
     ref_local = ray.get(local.ejecutar_todo.remote(x0))  # calentamiento + resultado de referencia
-    dif = float(np.abs(distribuido() - ref_local).max())
+    dif = float(np.abs(ejecutar_distribuido(frags, x0, capas) - ref_local).max())
 
     t_local, t_dist = [], []
     for _ in range(repeticiones):
         t = time.perf_counter(); ray.get(local.ejecutar_todo.remote(x0)); t_local.append(time.perf_counter() - t)
-        t = time.perf_counter(); distribuido(); t_dist.append(time.perf_counter() - t)
+        t = time.perf_counter(); ejecutar_distribuido(frags, x0, capas); t_dist.append(time.perf_counter() - t)
 
     for a in [local, *frags]:
         ray.kill(a)

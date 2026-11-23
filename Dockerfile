@@ -14,3 +14,4 @@ RUN python -c "from transformers import GPT2LMHeadModel, GPT2TokenizerFast; \
 GPT2LMHeadModel.from_pretrained('gpt2'); GPT2TokenizerFast.from_pretrained('gpt2')"
 
 COPY src/ src/
+ENV PYTHONPATH=/app/src

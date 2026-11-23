@@ -19,6 +19,7 @@ import ray
 import torch
 
 from cluster import conectar, host
+from eventos import emitir, instante, nodo_id, tarea
 from modelo import Tramo, cargar_modelo, generar
 
 
@@ -29,12 +30,17 @@ class Replica:
         self.tramo = Tramo(modelo, 0, len(modelo.transformer.h))
         self.nombre = nombre
         print(f"[{nombre}] lista en {host()}")  # se vuelve a ver si Ray la recrea
+        emitir("evento", texto=f"{nombre} lista")
 
     def listo(self):
         return host()
 
-    def generar(self, ids, n_tokens):
-        salida = generar(self.tramo, ids, n_tokens)
+    def donde(self):
+        return nodo_id()
+
+    def generar(self, ids, n_tokens, pedido=0):
+        with tarea(f"pedido {pedido + 1}", f"r{pedido}", 1, clave=pedido, replica=self.nombre):
+            salida = generar(self.tramo, ids, n_tokens)
         return {"replica": self.nombre, "nodo": host(), "tokens": salida.shape[1]}
 
 
@@ -46,15 +52,21 @@ class Router:
         self.atendidos = {}  # (réplica, nodo) -> cantidad
         self.latencias = []
 
-    async def atender(self, ids, n_tokens):
+    def listo(self):
+        return True
+
+    async def atender(self, ids, n_tokens, pedido=0):
         i = min(range(len(self.replicas)), key=lambda j: self.en_curso[j])  # menos cargada
         self.en_curso[i] += 1
+        instante(f"asignar pedido {pedido + 1}", f"r{pedido}", 0, clave=pedido)
         t = time.perf_counter()
         try:
-            r = await self.replicas[i].generar.remote(ids, n_tokens)
+            r = await self.replicas[i].generar.remote(ids, n_tokens, pedido)
         finally:
             self.en_curso[i] -= 1
         r["latencia_s"] = time.perf_counter() - t
+        instante(f"respuesta {pedido + 1}", f"r{pedido}", 2, clave=pedido)
+        emitir("pedido_fin", pedido=pedido, latencia=r["latencia_s"], replica=r["replica"])
         clave = f"{r['replica']}@{r['nodo']}"
         self.atendidos[clave] = self.atendidos.get(clave, 0) + 1
         self.latencias.append(r["latencia_s"])
@@ -87,7 +99,7 @@ def main():
     print(f"\n{a.pedidos} pedidos simultáneos, {a.replicas} réplica(s), {a.tokens} tokens cada uno.")
     print("Para probar la tolerancia a fallas, en otra terminal:  docker compose kill ray-worker-2\n")
     t0 = time.perf_counter()
-    pendientes = {router.atender.remote(x, a.tokens): i for i, x in enumerate(prompts)}
+    pendientes = {router.atender.remote(x, a.tokens, i): i for i, x in enumerate(prompts)}
     filas = []
     falla_pendiente = a.simular_falla is not None and len(replicas) > 1
     while pendientes:
