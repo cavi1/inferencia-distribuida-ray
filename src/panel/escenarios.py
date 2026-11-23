@@ -16,6 +16,7 @@ import demo2_pipeline as d2
 import demo3_router as d3
 from cluster import NODOS, en_nodo
 from eventos import emitir
+from modelo import cargar_tokenizer, codificar, decodificar, muestrear
 
 _cache = {"pipeline": None, "replicas": None}  # actores que se conservan entre ejecuciones (cargar GPT-2 tarda)
 pedir_falla = threading.Event()
@@ -33,7 +34,7 @@ def liberar(conservar=None):
     """Mata los actores cacheados de otras demos para liberar CPUs."""
     for clave, valor in list(_cache.items()):
         if clave != conservar and valor:
-            for actor in valor["actores"]:
+            for actor in valor["actores"] + ([valor["router"]] if valor.get("router") else []):
                 try:
                     ray.kill(actor)
                 except Exception:
@@ -77,10 +78,8 @@ def tensores(p):
 
 
 # ---------------------------------------------------------------- demo 2
-def pipeline(p):
-    liberar(conservar="pipeline")
-    pedidos = _entero(p, "pedidos", 6, 2, 16)
-    largo = _entero(p, "largo", 64, 8, 256)
+def _etapas():
+    """Etapa 1 en nodo-a, etapa 2 en nodo-b y el modelo entero en nodo-a (se conservan entre ejecuciones)."""
     if not _cache["pipeline"]:
         emitir("estado", texto="Cargando GPT-2 en cada nodo (la primera vez tarda unos segundos)...")
         e1 = d2.Etapa.options(**en_nodo(NODOS[0])).remote(0, 6, "etapa 1")
@@ -88,7 +87,14 @@ def pipeline(p):
         completo = d2.ModeloCompleto.options(**en_nodo(NODOS[0])).remote()
         ray.get([e1.info.remote(), e2.info.remote(), completo.info.remote()])
         _cache["pipeline"] = {"actores": [e1, e2, completo]}
-    e1, e2, completo = _cache["pipeline"]["actores"]
+    return _cache["pipeline"]["actores"]
+
+
+def pipeline(p):
+    liberar(conservar="pipeline")
+    pedidos = _entero(p, "pedidos", 6, 2, 16)
+    largo = _entero(p, "largo", 64, 8, 256)
+    e1, e2, completo = _etapas()
 
     g = torch.Generator().manual_seed(0)
     xs = [torch.randint(0, 50257, (1, largo), generator=g) for _ in range(pedidos)]
@@ -126,11 +132,8 @@ def pipeline(p):
 
 
 # ---------------------------------------------------------------- demo 3
-def replicas(p):
-    liberar(conservar="replicas")
-    pedidos = _entero(p, "pedidos", 16, 2, 40)
-    tokens = _entero(p, "tokens", 6, 1, 30)
-    n_rep = _entero(p, "replicas", 2, 1, 2)
+def _replicas(n_rep):
+    """Una réplica por nodo (se conservan entre ejecuciones). Devuelve (réplicas, id de nodo de cada una)."""
     def crear():
         liberar()
         time.sleep(1.5)  # ray.kill es asíncrono: dar tiempo a que se liberen las CPUs antes de ubicar las nuevas
@@ -147,6 +150,15 @@ def replicas(p):
         if n_rep == 1 or len(set(donde)) == n_rep:
             break
         crear()  # una caída anterior (o un reparto desparejo) las dejó juntas en un solo nodo
+    return reps, donde
+
+
+def replicas(p):
+    liberar(conservar="replicas")
+    pedidos = _entero(p, "pedidos", 16, 2, 40)
+    tokens = _entero(p, "tokens", 6, 1, 30)
+    n_rep = _entero(p, "replicas", 2, 1, 2)
+    reps, donde = _replicas(n_rep)
     router = d3.Router.remote(reps)
     ray.get(router.listo.remote())  # que el router ya esté vivo antes de empezar a medir
 
@@ -178,6 +190,76 @@ def replicas(p):
            texto=f"Se completaron {completados} de {pedidos} pedidos en {total:.1f} s "
                  f"({pedidos / total:.2f} pedidos por segundo).")
     ray.kill(router)
+
+
+# ---------------------------------------------------------------- chat: completar una frase
+_tok = {"t": None}
+CONTEXTO = 1024  # posiciones de GPT-2: frase + palabras generadas no pueden pasar de acá
+
+
+def _nombres_nodos():
+    nombres = {}
+    for n in ray.nodes():
+        r = n["Resources"]
+        nombres[n["NodeID"]] = "nodo-a" if "nodo_a" in r else "nodo-b" if "nodo_b" in r else "ray-head"
+    return nombres
+
+
+def chat(p, estado):
+    """Completa `p["texto"]` palabra por palabra en modo réplicas o pipeline.
+    No usa el bus de eventos: va dejando todo en `estado`, que la página consulta."""
+    if _tok["t"] is None:
+        _tok["t"] = cargar_tokenizer()
+    tok = _tok["t"]
+    modo = p["modo"]
+    ids = codificar(tok, p["texto"])
+    n = p["palabras"]
+    if ids.shape[1] + n > CONTEXTO:
+        raise ValueError(f"la frase es demasiado larga: GPT-2 admite {CONTEXTO} tokens en total")
+    semilla = int(time.time())
+    nombres = _nombres_nodos()
+
+    if modo == "replicas":
+        liberar(conservar="replicas")
+        reps, donde = _replicas(2)
+        if not _cache["replicas"].get("router"):
+            _cache["replicas"]["router"] = d3.Router.remote(reps)
+        router = _cache["replicas"]["router"]
+        i = ray.get(router.elegir.remote())
+        estado.update(replica=f"réplica {i + 1}", nodo=nombres.get(donde[i]), fase="generando")
+    else:
+        liberar(conservar="pipeline")
+        e1, e2, _ = _etapas()
+        estado.update(fase="generando")
+    pedir_falla.clear()
+
+    texto_previo = decodificar(tok, ids)
+    try:
+        for k in range(n):
+            t = time.perf_counter()
+            if modo == "replicas":
+                if pedir_falla.is_set():
+                    pedir_falla.clear()
+                    estado["caida"] = {"palabra": k, "nodo": estado["nodo"], "ts": time.time()}
+                    ray.kill(reps[i], no_restart=False)  # como una caída del proceso: Ray la recrea
+                    time.sleep(0.5)  # ray.kill es asíncrono: que la caída llegue antes de pedir esta palabra
+                siguiente, nodo = ray.get(reps[i].paso.remote(ids, semilla + k))
+                nodo = nodo.split("/")[0]
+                estado["nodo"] = nodo  # tras una caída, Ray puede recrearla en otro nodo
+                pasos = [nodo]
+            else:
+                logits = ray.get(e2.forward.remote(e1.forward.remote(ids, "chat", 1), "chat", 2))
+                siguiente = int(muestrear(logits, ids, torch.Generator().manual_seed(semilla + k)))
+                pasos = ["nodo-a", "nodo-b"]
+            ids = torch.cat([ids, torch.tensor([[siguiente]])], dim=1)
+            texto = decodificar(tok, ids)
+            estado["palabras"].append({"texto": texto[len(texto_previo):], "nodos": pasos,
+                                       "ms": round((time.perf_counter() - t) * 1000), "ts": time.time()})
+            texto_previo = texto
+    finally:
+        if modo == "replicas":
+            router.soltar.remote(i)
+    estado["fase"] = "listo"
 
 
 ESCENARIOS = {"tensores": tensores, "pipeline": pipeline, "replicas": replicas}

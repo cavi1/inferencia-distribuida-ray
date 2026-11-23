@@ -20,7 +20,7 @@ import torch
 
 from cluster import conectar, host
 from eventos import emitir, instante, nodo_id, tarea
-from modelo import Tramo, cargar_modelo, generar
+from modelo import Tramo, cargar_modelo, generar, muestrear
 
 
 @ray.remote(num_cpus=1, max_restarts=-1, max_task_retries=-1)
@@ -38,6 +38,13 @@ class Replica:
     def donde(self):
         return nodo_id()
 
+    def paso(self, ids, semilla):
+        """Una palabra del chat del panel. La semilla fija hace que un reintento tras una caída
+        devuelva el mismo token."""
+        logits = self.tramo(ids)
+        siguiente = muestrear(logits, ids, torch.Generator().manual_seed(semilla))
+        return int(siguiente), host()
+
     def generar(self, ids, n_tokens, pedido=0):
         with tarea(f"pedido {pedido + 1}", f"r{pedido}", 1, clave=pedido, replica=self.nombre):
             salida = generar(self.tramo, ids, n_tokens)
@@ -49,11 +56,22 @@ class Router:
     def __init__(self, replicas):
         self.replicas = replicas
         self.en_curso = [0] * len(replicas)
+        self.total = [0] * len(replicas)
         self.atendidos = {}  # (réplica, nodo) -> cantidad
         self.latencias = []
 
     def listo(self):
         return True
+
+    def elegir(self):
+        """Réplica con menos pedidos en curso; si empatan, la que atendió menos (chat del panel)."""
+        i = min(range(len(self.replicas)), key=lambda j: (self.en_curso[j], self.total[j]))
+        self.en_curso[i] += 1
+        self.total[i] += 1
+        return i
+
+    def soltar(self, i):
+        self.en_curso[i] -= 1
 
     async def atender(self, ids, n_tokens, pedido=0):
         i = min(range(len(self.replicas)), key=lambda j: self.en_curso[j])  # menos cargada
