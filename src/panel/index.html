@@ -321,6 +321,12 @@ function derivar() {
   }
   d.spans.sort((a, b) => a.t0 - b.t0);
   d.fallas.sort((a, b) => a.t - b.t);
+  for (const f of d.fallas) {
+    const rep = (f.texto.match(/réplica \d+/) || [""])[0];
+    const vuelta = d.marcas.find((m) => m.t > f.t && m.texto.includes("lista") && m.texto.includes(rep));
+    f.hasta = vuelta ? vuelta.t : null;  // null: todavía se está recreando
+    f.replica = rep;
+  }
   d.fases.sort((a, b) => a.t0 - b.t0);
   d.fases.forEach((f, i) => {
     const sig = d.fases[i + 1];
@@ -513,11 +519,11 @@ function dibujarEscenario(t) {
     const g = $("nodo_" + n); if (!g) continue;
     const caja = g.querySelector(".caja"), est = g.querySelector(".estado");
     const caido = S.vivos && S.nodos.size && !S.vivos.has(n);
-    const falla = d.fallas.find((f) => f.nodo === n && t >= f.t && t < f.t + 1.2 / Math.max(S.vel, 0.05))
-      || (S.fallaYa && S.fallaYa.nodo === n && performance.now() < S.fallaYa.hasta);  // respuesta inmediata al click
+    const falla = d.fallas.find((f) => f.nodo === n && t >= f.t && t < (f.hasta ?? (d.fin ? d.fin_datos : Infinity)))
+      || (S.fallaYa && S.fallaYa.nodo === n && performance.now() < S.fallaYa.hasta && { replica: "réplica" });  // respuesta inmediata al click
     const lista = activos.get(n);
     if (caido) { caja.setAttribute("stroke", "var(--alerta)"); caja.setAttribute("fill", "var(--alerta-fondo)"); est.textContent = "caído"; }
-    else if (falla) { caja.setAttribute("stroke", "var(--alerta)"); caja.setAttribute("fill", "var(--alerta-fondo)"); est.textContent = "se cayó una réplica"; }
+    else if (falla) { caja.setAttribute("stroke", "var(--alerta)"); caja.setAttribute("fill", "var(--alerta-fondo)"); est.textContent = `${falla.replica || "réplica"} caída · recreándose…`; }
     else if (lista) {
       caja.setAttribute("stroke", "var(--acento)"); caja.setAttribute("fill", "var(--acento-fondo)");
       const textos = [...new Set(lista.map((s) => s.texto))];
@@ -586,6 +592,13 @@ function dibujarTiempo(t) {
     if (t < x.b_span.t0 || x.b_span.t0 - x.a_span.t1 > 0.12 * dominio) continue;  // no dibujar esperas largas en cola
     const ya = MT + ORDEN_NODOS.indexOf(x.de) * FILA + FILA / 2, yb = MT + ORDEN_NODOS.indexOf(x.a) * FILA + FILA / 2;
     h += `<line x1="${X(Math.min(x.a_span.t1, t)).toFixed(1)}" y1="${ya}" x2="${X(Math.min(x.b_span.t0, t)).toFixed(1)}" y2="${yb}" stroke="var(--tenue)" stroke-width="1" opacity="0.45"/>`;
+  }
+  // tramos con una réplica caída, hasta que Ray la vuelve a tener lista
+  for (const f of d.fallas) {
+    const fi = ORDEN_NODOS.indexOf(f.nodo); if (fi < 0 || t < f.t) continue;
+    const x0 = X(f.t), x1 = X(Math.min(f.hasta ?? t, t));
+    h += `<rect x="${x0.toFixed(1)}" y="${MT + fi * FILA + 4}" width="${Math.max(0, x1 - x0).toFixed(1)}" height="${FILA - 8}" fill="var(--alerta-fondo)" stroke="var(--alerta)" stroke-dasharray="4 3" rx="4"/>`;
+    if (x1 - x0 > 150) h += `<text x="${(x0 + 8).toFixed(1)}" y="${MT + fi * FILA + FILA / 2 + 4}" font-size="12" style="fill:var(--alerta)">${esc(f.replica)} caída · Ray la recrea</text>`;
   }
   // barras
   for (const s of d.spans) {

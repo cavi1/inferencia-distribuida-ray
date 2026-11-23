@@ -144,7 +144,8 @@ def _replicas(n_rep):
         liberar()
         time.sleep(1.5)  # ray.kill es asíncrono: dar tiempo a que se liberen las CPUs antes de ubicar las nuevas
         emitir("estado", texto="Cargando una copia de GPT-2 en cada nodo (la primera vez tarda unos segundos)...")
-        reps = [d3.Replica.options(scheduling_strategy="SPREAD").remote(f"réplica {i + 1}") for i in range(n_rep)]
+        # cada réplica atada a su nodo: si se cae, Ray la recrea en el mismo nodo y no en el otro
+        reps = [d3.Replica.options(**en_nodo(NODOS[i])).remote(f"réplica {i + 1}") for i in range(n_rep)]
         ray.get([r.listo.remote() for r in reps])
         _cache["replicas"] = {"actores": reps, "n": n_rep}
 
