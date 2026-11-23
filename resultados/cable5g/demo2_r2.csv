@@ -1,0 +1,7 @@
+escenario,segundos,pedidos_por_s
+"modelo entero, 1 nodo",4.123,1.94
+"pipeline, de a uno",10.413,0.768
+"pipeline, solapado",8.641,0.926
+dif_max_logits,0.0,
+ms_por_token_pipeline,226.31,
+ms_por_token_entero,119.8,
