@@ -27,7 +27,7 @@ responde preguntas. El foco es el reparto que hace Ray.
 | Réplicas | El Router elige la réplica menos usada (se encienden Router y nodo). El pedido viaja head → nodo, se encienden las 12 capas de ese nodo, la palabra vuelve al head y se imprime. |
 | Pipeline | Viaja head → nodo-a, se encienden las capas 1–6, el estado oculto viaja a nodo-b, se encienden las 7–12, la palabra vuelve al head y se imprime. |
 | Caída | En réplicas, el botón mata el proceso de la réplica en uso. El nodo se marca caído hasta que Ray la recrea y la frase sigue sin perder palabras. |
-| Cortar nodo | En réplicas, apaga Ray en el nodo que responde. Su pila de capas flota hasta que Ray recrea la réplica en el otro nodo, viaja hasta ahí y aterriza como una segunda pila. En la respuesta, una marca «✂» muestra cuánto duró la pausa. El nodo vuelve solo a los 20 s y la frase siguiente reparte las réplicas de nuevo. En pipeline el botón está deshabilitado: cada mitad del modelo está atada a su nodo. |
+| Cortar nodo | En réplicas, apaga Ray en el nodo que responde. Su pila de capas flota hasta que Ray recrea la réplica en el otro nodo, viaja hasta ahí y aterriza como una segunda pila. En la respuesta, una marca de corte muestra cuánto duró la pausa. El nodo vuelve solo a los 20 s y la frase siguiente reparte las réplicas de nuevo. En pipeline el botón está deshabilitado: cada mitad del modelo está atada a su nodo. |
 
 Las animaciones siguen a los eventos reales; si las palabras llegan más rápido que la animación,
 la animación se acelera para no atrasarse.

@@ -460,7 +460,7 @@ function construirControles() {
   html += segmentos("Velocidad", VELOCIDADES, S.vel, "vel");
   html += `<div class="botones">
     <button id="btnRepetir" class="enlace">↺ Ver de nuevo</button>
-    ${S.demo === "replicas" ? '<button id="btnFalla" class="peligro">⚡ Simular caída</button><button id="btnCortar" class="peligro">✂ Cortar nodo-b</button>' : ""}
+    ${S.demo === "replicas" ? '<button id="btnFalla" class="peligro">⚡ Simular caída</button><button id="btnCortar" class="peligro">Cortar nodo-b</button>' : ""}
     <button id="btnEjecutar" class="principal">▶ Ejecutar</button>
   </div>`;
   cont.innerHTML = html;
@@ -483,10 +483,10 @@ function construirControles() {
   };
   if ($("btnCortar")) $("btnCortar").onclick = async () => {
     const b = $("btnCortar");
-    b.disabled = true; b.textContent = "✂ Cortando…";
+    b.disabled = true; b.textContent = "Cortando…";
     try { S.fallaYa = { nodo: (await api("/api/cortar", {})).nodo, entero: true, hasta: performance.now() + 2500 }; }
     catch (e) { mostrarError(e); }
-    finally { b.textContent = "✂ Cortar nodo-b"; actualizarBotones(); }
+    finally { b.textContent = "Cortar nodo-b"; actualizarBotones(); }
   };
   actualizarBotones();
 }

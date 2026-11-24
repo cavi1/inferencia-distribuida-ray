@@ -131,7 +131,7 @@ async function animarPalabra(p) {
     if (corto(p.nodos[0]) === k.de) { imprimir(p); return; }
     // primera palabra en el nodo nuevo: su tiempo incluye la espera por la réplica recreada
     for (let i = 0; i < 300 && (k.fase === "buscando" || k.fase === "volando"); i++) await esperar(100);  // hasta 30 s
-    $("salida").insertAdjacentHTML("beforeend", `<span class="corte">✂ ${esc(k.nodo)} apagado · ${(p.ms / 1000).toFixed(1)} s</span>`);
+    $("salida").insertAdjacentHTML("beforeend", `<span class="corte">${esc(k.nodo)} apagado · ${(p.ms / 1000).toFixed(1)} s</span>`);
     k.marcada = true; k.fase = "lista";
   }
   const caida = S.chat.caida;
