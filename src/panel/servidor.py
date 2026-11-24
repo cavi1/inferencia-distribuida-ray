@@ -7,7 +7,12 @@ de eventos y expone una API chica que usa la página:
   GET  /api/nodos        nodos del cluster (y si están vivos)
   GET  /api/eventos      eventos nuevos desde la posición `desde`
   POST /api/ejecutar     {"demo": "tensores" | "pipeline" | "replicas", ...parámetros}
-  POST /api/falla        mata la réplica 2 durante la demo de réplicas
+  POST /api/cortar       apaga Ray en nodo-b durante la demo de réplicas, o el nodo que responde
+                         la frase (vuelve solo al rato)
+  POST /api/falla        mata la réplica 2 durante la demo de réplicas (o la réplica en uso del chat)
+  GET  /chat.js          la pestaña «Completá la frase» (/?demo=frase)
+  POST /api/chat         {"texto", "modo": "replicas" | "pipeline", "palabras"}
+  GET  /api/chat         estado de la frase en curso
 """
 import os
 import sys
@@ -50,6 +55,24 @@ def pagina():
     return FileResponse(os.path.join(AQUI, "index.html"))
 
 
+@app.get("/chat.js")
+def chat_js():
+    return FileResponse(os.path.join(AQUI, "chat.js"), media_type="text/javascript")
+
+
+@app.get("/fuentes/{archivo}")
+def fuentes(archivo: str):
+    ruta = os.path.join(AQUI, "fuentes", os.path.basename(archivo))  # basename: nada fuera de fuentes/
+    if not os.path.isfile(ruta):
+        raise HTTPException(404)
+    return FileResponse(ruta)
+
+
+@app.get("/figura.svg")
+def figura():
+    return FileResponse(os.path.join(AQUI, "figura.svg"), media_type="image/svg+xml")
+
+
 @app.get("/api/nodos")
 def nodos():
     return [{"id": n["NodeID"], "nombre": nombre_nodo(n), "vivo": n["Alive"]} for n in ray.nodes()]
@@ -88,12 +111,83 @@ def ejecutar(params: dict = Body(...)):
     return {"ok": True}
 
 
+chat_estado = {"fase": "vacio", "palabras": []}
+
+
+def _correr_chat(params):
+    try:
+        escenarios.chat(params, chat_estado)
+    except Exception as e:
+        traceback.print_exc()
+        chat_estado.update(fase="error", error=f"{type(e).__name__}: {e}")
+    finally:
+        estado["corriendo"] = False
+
+
+@app.post("/api/chat")
+def chat(params: dict = Body(...)):
+    texto = params.get("texto")
+    if not isinstance(texto, str):
+        raise HTTPException(400, "falta el texto")
+    texto = texto.strip()
+    modo = params.get("modo")
+    if not 1 <= len(texto) <= 200:
+        raise HTTPException(400, "escribí entre 1 y 200 caracteres")
+    if modo not in ("replicas", "pipeline"):
+        raise HTTPException(400, "modo desconocido")
+    palabras = escenarios._entero(params, "palabras", 20, 1, 40)
+    with bloqueo:
+        if estado["corriendo"]:
+            raise HTTPException(409, "ya hay una ejecución en curso")
+        estado.update(corriendo=True, demo="chat")
+    global chat_estado
+    inicio = time.time()
+    # se reemplaza el dict entero (no clear + update): una consulta nunca ve el estado a medio armar
+    chat_estado = {"fase": "cargando", "modo": modo, "texto": texto, "total": palabras, "palabras": [], "inicio": inicio}
+    threading.Thread(target=_correr_chat, args=({"texto": texto, "modo": modo, "palabras": palabras},), daemon=True).start()
+    return {"ok": True, "inicio": inicio}
+
+
+@app.get("/api/chat")
+def ver_chat():
+    corte = chat_estado.get("corte")
+    if corte and "lista" not in corte and "desde" in corte:
+        # la réplica avisa por el bus cuando Ray empieza a recrearla («cargando») y cuando quedó «lista»
+        nuevos, _ = ray.get(bus.leer.remote(corte["desde"]))
+        nombres = escenarios._nombres_nodos()
+        for e in nuevos:
+            if e.get("tipo") != "evento" or not e.get("texto", "").startswith(corte["replica"] + " "):
+                continue
+            corte.setdefault("destino", nombres.get(e["nodo"]))
+            corte.setdefault("t_carga", e["ts"])
+            if e["texto"].endswith("lista"):
+                corte["lista"] = e["ts"]
+    return {**chat_estado, "ahora": time.time()}
+
+
+@app.post("/api/cortar")
+def cortar():
+    en_chat = estado["demo"] == "chat" and chat_estado.get("modo") == "replicas"
+    if not estado["corriendo"] or not (estado["demo"] == "replicas" or en_chat):
+        raise HTTPException(409, "se puede cortar un nodo solo con réplicas en marcha")
+    desde = ray.get(bus.leer.remote(10**9))[1] if en_chat else 0  # para seguir en el bus a la réplica recreada
+    corte = escenarios.cortar()
+    if corte is None:
+        raise HTTPException(409, "ese nodo ya está apagado o las réplicas todavía no arrancaron")
+    if en_chat:
+        chat_estado["corte"]["desde"] = desde
+    return {"ok": True, **corte}
+
+
 @app.post("/api/falla")
 def falla():
-    if not estado["corriendo"] or estado["demo"] != "replicas":
-        raise HTTPException(409, "la caída solo se puede simular durante la demo de réplicas")
-    escenarios.pedir_falla.set()
-    return {"ok": True}
+    en_chat = estado["demo"] == "chat" and chat_estado.get("modo") == "replicas"
+    if not estado["corriendo"] or not (estado["demo"] == "replicas" or en_chat):
+        raise HTTPException(409, "la caída solo se puede simular con réplicas en marcha")
+    caida = escenarios.caer()
+    if caida is None:
+        raise HTTPException(409, "todavía no hay réplicas en marcha: probá en un segundo")
+    return {"ok": True, **caida}
 
 
 def main():

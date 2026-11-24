@@ -54,6 +54,7 @@ Elegí una demo en las pestañas, ajustá los parámetros y apretá **Ejecutar**
 - **Velocidad:** las demos de tensores duran milisegundos. En «× 1/20» o «× 1/50» se ven en cámara lenta. Las mediciones se hacen siempre a velocidad real; la cámara lenta solo cambia cómo se reproduce.
 - **Ver de nuevo:** repite la animación sin volver a ejecutar.
 - **Simular caída** (demo 3): mata el proceso de una réplica en plena ejecución. Ray la recrea y reintenta los pedidos que estaban en curso.
+- **Cortar nodo-b** (demo 3): apaga Ray en nodo-b, como si se desenchufara. Ray recrea la réplica 2 en nodo-a y ningún pedido se pierde. nodo-b vuelve a conectarse solo a los 20 s (`VUELTA_NODO` en `src/worker.sh`).
 
 Qué esperar:
 
@@ -70,6 +71,15 @@ docker compose kill ray-worker-2
 ```
 
 Ray tarda unos segundos en declarar muerto al nodo (por falta de *heartbeats*), recrea la réplica en `nodo-a` y reintenta los pedidos. El panel marca el nodo como caído. Como el contenedor tiene `restart: on-failure`, puede volver solo a los pocos segundos.
+
+## Completá la frase
+
+En la pestaña «4 · Completá la frase» del panel (`http://localhost:8000/?demo=frase`) se escribe el comienzo de una frase en inglés y GPT-2 la completa en el cluster, palabra por palabra. Un dibujo isométrico del cluster muestra qué nodo calcula cada palabra:
+
+- **Réplicas:** el Router elige la réplica menos usada y ese nodo genera toda la frase. «Simular caída» mata la réplica a mitad de frase: Ray la recrea y la frase sigue sin perder palabras. «Cortar nodo» apaga el nodo que está respondiendo: su pila de capas se muda al otro nodo y la frase sigue desde ahí (solo en modo Réplicas).
+- **Pipeline:** cada palabra pasa por las capas 1–6 en nodo-a y por las 7–12 en nodo-b.
+
+GPT-2 small autocompleta texto, no responde preguntas: lo que se muestra es el reparto. El diseño está en `docs/chat-panel.md`. El dibujo (`src/panel/figura.svg`) se genera con `herramientas/figura/build.mjs`.
 
 ## Demos por consola
 
@@ -159,7 +169,10 @@ src/eventos.py         bus de eventos que alimenta el panel
 src/demo1_tensores.py  paralelismo de tensores (numpy)
 src/demo2_pipeline.py  paralelismo de pipeline (GPT-2 en dos etapas)
 src/demo3_router.py    réplicas + router + tolerancia a fallas
-src/panel/             servidor web (FastAPI), escenarios y página (index.html)
+src/panel/             servidor web (FastAPI), escenarios, página (index.html, chat.js) y figura.svg
+src/panel/fuentes/     IBM Plex guardada en el repo, para usar el panel sin internet
+herramientas/figura/   genera figura.svg (kit isométrico de anatomy)
+docs/chat-panel.md     diseño de la pestaña «Completá la frase»
 src/secuencial.py      misma carga que la demo 3, sin Ray (línea base)
 scripts/latencia.sh    agrega latencia de red con tc/netem
 docker-compose.dos-maquinas.yml  cluster repartido en dos PCs (escritorio + notebook)

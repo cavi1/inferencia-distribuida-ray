@@ -4,7 +4,6 @@ y publican, además, el relato de lo que pasa (fases, estado, resúmenes).
 Cada escenario recibe un diccionario de parámetros y no devuelve nada: todo lo
 que el panel necesita sale por eventos (ver eventos.py).
 """
-import threading
 import time
 
 import numpy as np
@@ -14,11 +13,35 @@ import torch
 import demo1_tensores as d1
 import demo2_pipeline as d2
 import demo3_router as d3
+from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+
 from cluster import NODOS, en_nodo
 from eventos import emitir
+from modelo import cargar_tokenizer, codificar, decodificar, muestrear
 
 _cache = {"pipeline": None, "replicas": None}  # actores que se conservan entre ejecuciones (cargar GPT-2 tarda)
-pedir_falla = threading.Event()
+_caer = {"f": None, "cortar": None}  # la escena en marcha deja acá cómo tirar su réplica o su nodo
+
+
+def caer():
+    """La llama POST /api/falla: mata la réplica en el momento (sin esperar al bucle de la
+    escena) y devuelve {"nodo", y en el chat "palabra"}, o None si no hay réplicas en marcha."""
+    f = _caer["f"]
+    return f() if f else None
+
+
+def cortar():
+    """La llama POST /api/cortar: apaga Ray en nodo-b durante la demo de réplicas."""
+    f = _caer["cortar"]
+    return f() if f else None
+
+
+@ray.remote(num_cpus=0)
+def _apagar_ray():
+    import subprocess
+    # «ray stop» normal: el nodo avisa que se va y el cluster lo da por muerto en ~1 s.
+    # src/worker.sh lo vuelve a conectar al rato.
+    subprocess.Popen(["ray", "stop"], start_new_session=True)
 
 
 def _entero(p, nombre, defecto, minimo, maximo):
@@ -33,7 +56,7 @@ def liberar(conservar=None):
     """Mata los actores cacheados de otras demos para liberar CPUs."""
     for clave, valor in list(_cache.items()):
         if clave != conservar and valor:
-            for actor in valor["actores"]:
+            for actor in valor["actores"] + ([valor["router"]] if valor.get("router") else []):
                 try:
                     ray.kill(actor)
                 except Exception:
@@ -77,10 +100,8 @@ def tensores(p):
 
 
 # ---------------------------------------------------------------- demo 2
-def pipeline(p):
-    liberar(conservar="pipeline")
-    pedidos = _entero(p, "pedidos", 6, 2, 16)
-    largo = _entero(p, "largo", 64, 8, 256)
+def _etapas():
+    """Etapa 1 en nodo-a, etapa 2 en nodo-b y el modelo entero en nodo-a (se conservan entre ejecuciones)."""
     if not _cache["pipeline"]:
         emitir("estado", texto="Cargando GPT-2 en cada nodo (la primera vez tarda unos segundos)...")
         e1 = d2.Etapa.options(**en_nodo(NODOS[0])).remote(0, 6, "etapa 1")
@@ -88,7 +109,14 @@ def pipeline(p):
         completo = d2.ModeloCompleto.options(**en_nodo(NODOS[0])).remote()
         ray.get([e1.info.remote(), e2.info.remote(), completo.info.remote()])
         _cache["pipeline"] = {"actores": [e1, e2, completo]}
-    e1, e2, completo = _cache["pipeline"]["actores"]
+    return _cache["pipeline"]["actores"]
+
+
+def pipeline(p):
+    liberar(conservar="pipeline")
+    pedidos = _entero(p, "pedidos", 6, 2, 16)
+    largo = _entero(p, "largo", 64, 8, 256)
+    e1, e2, completo = _etapas()
 
     g = torch.Generator().manual_seed(0)
     xs = [torch.randint(0, 50257, (1, largo), generator=g) for _ in range(pedidos)]
@@ -126,16 +154,31 @@ def pipeline(p):
 
 
 # ---------------------------------------------------------------- demo 3
-def replicas(p):
-    liberar(conservar="replicas")
-    pedidos = _entero(p, "pedidos", 16, 2, 40)
-    tokens = _entero(p, "tokens", 6, 1, 30)
-    n_rep = _entero(p, "replicas", 2, 1, 2)
+def _vivos():
+    return {r for n in ray.nodes() if n["Alive"] for r in n["Resources"] if r in NODOS}
+
+
+def _esperar_nodos(n_rep, avisar, limite=60):
+    """Tras «Cortar nodo», el nodo vuelve a los ~20 s: se lo espera para repartir una réplica por nodo."""
+    t0 = time.time()
+    while len(_vivos()) < n_rep and time.time() - t0 < limite:
+        faltan = ", ".join(n.replace("_", "-") for n in NODOS[:n_rep] if n not in _vivos())
+        avisar(f"Esperando a que {faltan} vuelva a conectarse…")
+        time.sleep(1)
+
+
+def _replicas(n_rep, avisar=lambda texto: emitir("estado", texto=texto)):
+    """Una réplica por nodo (se conservan entre ejecuciones). Devuelve (réplicas, id de nodo de cada una)."""
     def crear():
         liberar()
         time.sleep(1.5)  # ray.kill es asíncrono: dar tiempo a que se liberen las CPUs antes de ubicar las nuevas
+        _esperar_nodos(n_rep, avisar)
         emitir("estado", texto="Cargando una copia de GPT-2 en cada nodo (la primera vez tarda unos segundos)...")
-        reps = [d3.Replica.options(scheduling_strategy="SPREAD").remote(f"réplica {i + 1}") for i in range(n_rep)]
+        # cada réplica prefiere su nodo (soft): si se cae solo la réplica, Ray la recrea ahí mismo;
+        # si se apaga el nodo entero, la recrea en otro nodo con lugar
+        ids = {r: n["NodeID"] for n in ray.nodes() if n["Alive"] for r in n["Resources"] if r in NODOS}
+        reps = [d3.Replica.options(**({"scheduling_strategy": NodeAffinitySchedulingStrategy(ids[NODOS[i]], soft=True)}
+                                      if NODOS[i] in ids else {})).remote(f"réplica {i + 1}") for i in range(n_rep)]
         ray.get([r.listo.remote() for r in reps])
         _cache["replicas"] = {"actores": reps, "n": n_rep}
 
@@ -147,29 +190,55 @@ def replicas(p):
         if n_rep == 1 or len(set(donde)) == n_rep:
             break
         crear()  # una caída anterior (o un reparto desparejo) las dejó juntas en un solo nodo
+    return reps, donde
+
+
+def replicas(p):
+    liberar(conservar="replicas")
+    pedidos = _entero(p, "pedidos", 16, 2, 40)
+    tokens = _entero(p, "tokens", 6, 1, 30)
+    n_rep = _entero(p, "replicas", 2, 1, 2)
+    reps, donde = _replicas(n_rep)
     router = d3.Router.remote(reps)
     ray.get(router.listo.remote())  # que el router ya esté vivo antes de empezar a medir
 
     g = torch.Generator().manual_seed(0)
     prompts = [torch.randint(0, 50257, (1, 16), generator=g) for _ in range(pedidos)]
     ray.get([r.generar.remote(prompts[0], 1, 0) for r in reps])  # calentamiento
-    pedir_falla.clear()
+    nombres = _nombres_nodos()
+
+    def tirar():
+        ray.kill(reps[1], no_restart=False)  # como una caída del proceso: Ray la recrea
+        emitir("falla", texto="se cayó la réplica 2", nodo_caido=donde[1])
+        return {"nodo": nombres.get(donde[1])}
+
+    def apagar():
+        if not any(n["Alive"] and n["NodeID"] == donde[1] for n in ray.nodes()):
+            return None  # ya está apagado
+        emitir("falla", texto="nodo apagado, tenía la réplica 2", nodo_caido=donde[1], nodo_entero=True)
+        _apagar_ray.options(**en_nodo(NODOS[1])).remote()
+        _caer["f"] = None  # la réplica 2 se va a otro nodo: «Simular caída» ya no sabría dónde está
+        return {"nodo": nombres.get(donde[1])}
+
+    for k, r in enumerate(donde):  # dónde arranca cada réplica (si Ray la mueve, lo dice el evento «lista»)
+        emitir("ubicacion", replica=f"réplica {k + 1}", nodo_rep=r)
 
     emitir("estado", texto="Midiendo")
     emitir("fase", clave="replicas", texto=f"{pedidos} pedidos a la vez, repartidos entre {n_rep} réplica(s)")
     t0 = time.perf_counter()
     pendientes = {router.atender.remote(x, tokens, i): i for i, x in enumerate(prompts)}
     completados = 0
-    while pendientes:
-        listos, _ = ray.wait(list(pendientes), num_returns=1, timeout=0.3)
-        if pedir_falla.is_set() and n_rep > 1:
-            pedir_falla.clear()
-            emitir("falla", texto="se cayó la réplica 2", nodo_caido=donde[1])
-            ray.kill(reps[1], no_restart=False)  # como una caída del proceso: Ray la recrea
-        for ref in listos:
-            ray.get(ref)
-            pendientes.pop(ref)
-            completados += 1
+    _caer["f"] = tirar if n_rep > 1 else None
+    _caer["cortar"] = apagar if n_rep > 1 else None
+    try:
+        while pendientes:
+            listos, _ = ray.wait(list(pendientes), num_returns=1, timeout=0.3)
+            for ref in listos:
+                ray.get(ref)
+                pendientes.pop(ref)
+                completados += 1
+    finally:
+        _caer["f"] = _caer["cortar"] = None
     total = time.perf_counter() - t0
     est = ray.get(router.estadisticas.remote())
     emitir("resumen", fase="replicas", segundos=total, pedidos=pedidos, completados=completados,
@@ -178,6 +247,89 @@ def replicas(p):
            texto=f"Se completaron {completados} de {pedidos} pedidos en {total:.1f} s "
                  f"({pedidos / total:.2f} pedidos por segundo).")
     ray.kill(router)
+
+
+# ---------------------------------------------------------------- chat: completar una frase
+_tok = {"t": None}
+CONTEXTO = 1024  # posiciones de GPT-2: frase + palabras generadas no pueden pasar de acá
+
+
+def _nombres_nodos():
+    nombres = {}
+    for n in ray.nodes():
+        r = n["Resources"]
+        nombres[n["NodeID"]] = "nodo-a" if "nodo_a" in r else "nodo-b" if "nodo_b" in r else "ray-head"
+    return nombres
+
+
+def chat(p, estado):
+    """Completa `p["texto"]` palabra por palabra en modo réplicas o pipeline.
+    No usa el bus de eventos: va dejando todo en `estado`, que la página consulta."""
+    if _tok["t"] is None:
+        _tok["t"] = cargar_tokenizer()
+    tok = _tok["t"]
+    modo = p["modo"]
+    ids = codificar(tok, p["texto"])
+    n = p["palabras"]
+    if ids.shape[1] + n > CONTEXTO:
+        raise ValueError(f"la frase es demasiado larga: GPT-2 admite {CONTEXTO} tokens en total")
+    semilla = int(time.time())
+    nombres = _nombres_nodos()
+
+    if modo == "replicas":
+        liberar(conservar="replicas")
+        reps, donde = _replicas(2, avisar=lambda texto: estado.update(aviso=texto))
+        estado.pop("aviso", None)
+        if not _cache["replicas"].get("router"):
+            _cache["replicas"]["router"] = d3.Router.remote(reps)
+        router = _cache["replicas"]["router"]
+        i = ray.get(router.elegir.remote())
+        estado.update(replica=f"réplica {i + 1}", nodo=_nombres_nodos().get(donde[i]), fase="generando")  # nombres al día: un nodo que volvió tiene id nuevo
+    else:
+        liberar(conservar="pipeline")
+        e1, e2, _ = _etapas()
+        estado.update(fase="generando")
+
+    def tirar():
+        estado["caida"] = {"palabra": len(estado["palabras"]), "nodo": estado["nodo"], "ts": time.time()}
+        ray.kill(reps[i], no_restart=False)  # la palabra en curso falla y Ray la reintenta en la réplica recreada
+        return {"nodo": estado["nodo"], "palabra": estado["caida"]["palabra"]}
+
+    def apagar():
+        nodo = estado["nodo"]
+        recurso = nodo.replace("-", "_")
+        if recurso not in _vivos():
+            return None
+        estado["corte"] = {"palabra": len(estado["palabras"]), "nodo": nodo, "replica": f"réplica {i + 1}", "ts": time.time()}
+        _apagar_ray.options(**en_nodo(recurso)).remote()
+        _caer["f"] = None  # la réplica se va a otro nodo
+        return {"nodo": nodo, "palabra": estado["corte"]["palabra"]}
+
+    _caer["f"] = tirar if modo == "replicas" else None
+    _caer["cortar"] = apagar if modo == "replicas" else None
+    texto_previo = decodificar(tok, ids)
+    try:
+        for k in range(n):
+            t = time.perf_counter()
+            if modo == "replicas":
+                siguiente, nodo = ray.get(reps[i].paso.remote(ids, semilla + k))
+                nodo = nodo.split("/")[0]
+                estado["nodo"] = nodo  # tras una caída, Ray puede recrearla en otro nodo
+                pasos = [nodo]
+            else:
+                logits = ray.get(e2.forward.remote(e1.forward.remote(ids, "chat", 1), "chat", 2))
+                siguiente = int(muestrear(logits, ids, torch.Generator().manual_seed(semilla + k)))
+                pasos = ["nodo-a", "nodo-b"]
+            ids = torch.cat([ids, torch.tensor([[siguiente]])], dim=1)
+            texto = decodificar(tok, ids)
+            estado["palabras"].append({"texto": texto[len(texto_previo):], "nodos": pasos,
+                                       "ms": round((time.perf_counter() - t) * 1000), "ts": time.time()})
+            texto_previo = texto
+    finally:
+        _caer["f"] = _caer["cortar"] = None
+        if modo == "replicas":
+            router.soltar.remote(i)
+    estado["fase"] = "listo"
 
 
 ESCENARIOS = {"tensores": tensores, "pipeline": pipeline, "replicas": replicas}
