@@ -80,6 +80,7 @@ async function animarPalabra(p) {
   const ms = (x) => x / rapido;
   const nodos = p.nodos.map(corto);
   estado(`Palabra ${S.mostradas + 1} de ${S.chat.total}`, nodos.length > 1 ? "capas 1–6 en nodo-a, 7–12 en nodo-b" : `calcula nodo-${nodos[0]}`);
+  if (S.saltarHasta != null && S.mostradas < S.saltarHasta) { imprimir(p); return; }
   const caida = S.chat.caida;
   if (caida && caida.palabra === S.mostradas) {  // la caída se muestra cuando la animación llega a esa palabra
     part(caida.nodo).setAttribute("data-caido", "");
@@ -130,7 +131,7 @@ async function reproducir() {
 function estado(t, sub = "") { $("estado").innerHTML = `${esc(t)}${sub ? `<small>${esc(sub)}</small>` : ""}`; }
 function cerrar() {
   const c = S.chat;
-  S.cayendo = null;
+  S.cayendo = null; S.saltarHasta = null;
   if (c.fase === "listo") estado("Listo", `${c.palabras.length} palabras · ${c.modo === "replicas" ? "atendió " + c.nodo : "pipeline nodo-a → nodo-b"}`);
   for (const n of ["nodo-a", "nodo-b"]) part(n).removeAttribute("data-caido");
   actualizarBotones();
@@ -174,7 +175,7 @@ $("form").onsubmit = async (ev) => {
   mostrarError("");
   try {
     const r = await api("/api/chat", { texto, modo: modo(), palabras: S.cuantas });
-    S.inicio = r.inicio; S.cayendo = null;
+    S.inicio = r.inicio; S.cayendo = null; S.saltarHasta = null;
     S.corriendo = true; S.mostradas = 0; S.recibidas = 0; S.cola = [];
     S.chat = { total: S.cuantas, palabras: [], fase: "cargando", modo: modo() };
     $("salida").innerHTML = `<span class="prompt">${esc(texto)}</span>`;
@@ -190,6 +191,7 @@ $("caida").onclick = async () => {
   try {
     const r = await api("/api/falla", {});
     S.cayendo = r.nodo;  // se muestra ya, sin esperar a que la animación llegue a esa palabra
+    S.saltarHasta = r.palabra;  // las palabras de antes de la caída se imprimen sin animar
     if (part(r.nodo)) part(r.nodo).setAttribute("data-caido", "");
     estado(`Se cayó la réplica de ${r.nodo}`, "Ray la está recreando…");
   } catch (e) { mostrarError(e.message); }

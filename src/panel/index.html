@@ -248,7 +248,7 @@ const DEMOS = {
   },
   replicas: {
     nombre: "3 · Réplicas",
-    mirar: "Cada nodo tiene una copia completa del modelo y el head reparte los pedidos. Apretá «Simular caída» durante la ejecución: la réplica se recrea y ningún pedido se pierde.",
+    mirar: "Cada nodo tiene una copia completa del modelo y el head reparte los pedidos. Apretá «Simular caída» y Ray recrea la réplica en el mismo nodo; con «Cortar nodo-b» la recrea en nodo-a. En los dos casos ningún pedido se pierde.",
     velocidad: 1,
     color: "pedido",
     params: [
@@ -264,6 +264,7 @@ const PALETA = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2"
 const TEXTO_OSCURO = new Set([4, 6, 9]);
 const POS = { "ray-head": { x: 550, y: 66, w: 320, h: 92 }, "nodo-a": { x: 215, y: 262, w: 300, h: 100 }, "nodo-b": { x: 885, y: 262, w: 300, h: 100 } };
 const MIN_PAQUETE = 0.004;
+const VIAJE = 0.3;  // s: un dato viaja como mucho esto; si tardó más en llegar, el resto fue espera en el origen
 const NODO_COLOR = { "nodo-a": "var(--nodo-a)", "nodo-b": "var(--nodo-b)" };
 
 const $ = (id) => document.getElementById(id);
@@ -296,7 +297,7 @@ function derivar() {
   if (ini && ini.demo !== S.demo) { S.d = vacio(); return; }  // los eventos son de otra demo
   const ev = S.eventos;
   const primeraFase = ev.find((e) => e.tipo === "fase");
-  const d = { tCero: null, fases: [], spans: [], transf: [], fallas: [], marcas: [], terminados: [], resumenes: {}, comparacion: null,
+  const d = { ubic: [], cargas: [], tCero: null, fases: [], spans: [], transf: [], fallas: [], marcas: [], terminados: [], resumenes: {}, comparacion: null,
               estado: "", error: null, fin: ev.some((e) => e.tipo === "fin"), fin_t: null, sinNombre: false };
   for (const e of ev) {
     if (e.tipo === "estado") d.estado = e.texto;
@@ -305,9 +306,15 @@ function derivar() {
   if (!primeraFase) { S.d = d; return; }
   const t0 = primeraFase.ts;
   d.tCero = t0;
+  d.ubic = []; d.cargas = [];
+  for (const e of ev) if (e.tipo === "ubicacion") d.ubic.push({ t: -Infinity, replica: e.replica, nodo: nombreNodo(e.nodo_rep) });
   for (const e of ev) {
+    if (e.tipo === "evento" && /cargando$/.test(e.texto)) {  // Ray empezó a recrear una réplica en ese nodo
+      if (e.ts - t0 > 0) d.cargas.push({ t: e.ts - t0, replica: e.texto.replace(/ cargando$/, ""), nodo: nombreNodo(e.nodo) });
+      continue;
+    }
     if (e.tipo === "fase") d.fases.push({ clave: e.clave, texto: e.texto, t0: e.ts - t0, t1: null });
-    else if (e.tipo === "falla") d.fallas.push({ t: e.ts - t0, nodo: nombreNodo(e.nodo_caido), texto: e.texto });
+    else if (e.tipo === "falla") d.fallas.push({ t: e.ts - t0, nodo: nombreNodo(e.nodo_caido), texto: e.texto, entero: !!e.nodo_entero });
     else if (e.tipo === "evento" && e.ts - t0 > 0) d.marcas.push({ t: e.ts - t0, nodo: nombreNodo(e.nodo), texto: e.texto });
     else if (e.tipo === "pedido_fin") d.terminados.push({ t: e.ts - t0, latencia: e.latencia, pedido: e.pedido });
     else if (e.tipo === "resumen") {
@@ -326,6 +333,8 @@ function derivar() {
     const vuelta = d.marcas.find((m) => m.t > f.t && m.texto.includes("lista") && m.texto.includes(rep));
     f.hasta = vuelta ? vuelta.t : null;  // null: todavía se está recreando
     f.replica = rep;
+    f.carga = d.cargas.find((c) => c.t > f.t && c.replica === rep) || null;  // dónde la está recreando Ray
+    if (vuelta) d.ubic.push({ t: vuelta.t, replica: rep, nodo: vuelta.nodo });
   }
   d.fases.sort((a, b) => a.t0 - b.t0);
   d.fases.forEach((f, i) => {
@@ -429,7 +438,7 @@ function elegirDemo(id) {
   $("leyendaColor").textContent = DEMOS[id].color === "capa" ? "· cada color es una capa del modelo" : "· cada color es un pedido";
   $("banner").style.display = "none";
 }
-function vacio() { return { fases: [], spans: [], transf: [], fallas: [], marcas: [], terminados: [], resumenes: {}, comparacion: null, estado: "", error: null, fin: false, tCero: null, fin_datos: 0 }; }
+function vacio() { return { ubic: [], cargas: [], fases: [], spans: [], transf: [], fallas: [], marcas: [], terminados: [], resumenes: {}, comparacion: null, estado: "", error: null, fin: false, tCero: null, fin_datos: 0 }; }
 function derivarVacio() { S.eventos = []; S.d = vacio(); }
 const valorParam = (p) => Number(S.params[S.demo + "." + p.id] ?? p.defecto);
 const segmentos = (etiqueta, opciones, actual, clave) =>
@@ -447,7 +456,7 @@ function construirControles() {
   html += segmentos("Velocidad", VELOCIDADES, S.vel, "vel");
   html += `<div class="botones">
     <button id="btnRepetir" class="enlace">↺ Ver de nuevo</button>
-    ${S.demo === "replicas" ? '<button id="btnFalla" class="peligro">⚡ Simular caída</button>' : ""}
+    ${S.demo === "replicas" ? '<button id="btnFalla" class="peligro">⚡ Simular caída</button><button id="btnCortar" class="peligro">✂ Cortar nodo-b</button>' : ""}
     <button id="btnEjecutar" class="principal">▶ Ejecutar</button>
   </div>`;
   cont.innerHTML = html;
@@ -468,13 +477,21 @@ function construirControles() {
     catch (e) { mostrarError(e); }
     finally { b.textContent = "⚡ Simular caída"; actualizarBotones(); }
   };
+  if ($("btnCortar")) $("btnCortar").onclick = async () => {
+    const b = $("btnCortar");
+    b.disabled = true; b.textContent = "✂ Cortando…";
+    try { S.fallaYa = { nodo: (await api("/api/cortar", {})).nodo, entero: true, hasta: performance.now() + 2500 }; }
+    catch (e) { mostrarError(e); }
+    finally { b.textContent = "✂ Cortar nodo-b"; actualizarBotones(); }
+  };
   actualizarBotones();
 }
 function actualizarBotones() {
   const hay = S.d && S.d.spans.length > 0;
   if ($("btnEjecutar")) $("btnEjecutar").disabled = S.corriendo;
   if ($("btnRepetir")) $("btnRepetir").disabled = !hay || S.corriendo;
-  if ($("btnFalla")) $("btnFalla").disabled = !S.corriendo || !(S.d && S.d.fases.length);
+  if ($("btnFalla")) $("btnFalla").disabled = !S.corriendo || !(S.d && S.d.fases.length) || S.d.fallas.some((f) => f.entero);
+  if ($("btnCortar")) $("btnCortar").disabled = !S.corriendo || !(S.d && S.d.fases.length) || S.d.fallas.some((f) => f.entero) || !(S.vivos && S.vivos.has("nodo-b"));
   document.querySelectorAll("#pestanas button").forEach((b) => (b.disabled = S.corriendo));
 }
 function mostrarError(e) {
@@ -502,11 +519,17 @@ function construirEscenario() {
     h += `<g id="nodo_${n}"><rect class="caja" x="${p.x - p.w / 2}" y="${p.y - p.h / 2}" width="${p.w}" height="${p.h}" rx="8" fill="var(--tarjeta)" stroke="var(--linea)" stroke-width="2"/>
       ${NODO_COLOR[n] ? `<rect x="${p.x - p.w / 2 + 12}" y="${p.y - p.h / 2}" width="${p.w - 24}" height="4" rx="2" fill="${NODO_COLOR[n]}"/>` : ""}
       <text x="${p.x}" y="${p.y - p.h / 2 + 28}" text-anchor="middle" font-size="18" font-weight="600">${n}</text>
-      <text class="tenue" x="${p.x}" y="${p.y - p.h / 2 + 48}" text-anchor="middle" font-size="12.5">${ROL[n]}</text>
+      <text class="tenue rol" x="${p.x}" y="${p.y - p.h / 2 + 48}" text-anchor="middle" font-size="12.5">${ROL[n]}</text>
       <text class="estado" x="${p.x}" y="${p.y + p.h / 2 - 16}" text-anchor="middle" font-size="14">esperando</text></g>`;
   }
   h += `<g id="paquetes"></g>`;
   svg.innerHTML = h;
+}
+function replicasEn(d, nodo, t) {
+  const donde = new Map();
+  for (const u of [...d.ubic].sort((a, b) => a.t - b.t)) if (u.t <= t) donde.set(u.replica, u.nodo);
+  const caidas = new Set(d.fallas.filter((f) => t >= f.t && (f.hasta === null || t < f.hasta)).map((f) => f.replica));
+  return [...donde].filter(([r, n]) => n === nodo && !caidas.has(r)).map(([r]) => r).sort();
 }
 function dibujarEscenario(t) {
   const d = S.d;
@@ -519,10 +542,18 @@ function dibujarEscenario(t) {
     const g = $("nodo_" + n); if (!g) continue;
     const caja = g.querySelector(".caja"), est = g.querySelector(".estado");
     const caido = S.vivos && S.nodos.size && !S.vivos.has(n);
-    const falla = d.fallas.find((f) => f.nodo === n && t >= f.t && t < (f.hasta ?? (d.fin ? d.fin_datos : Infinity)))
+    const falla = d.fallas.find((f) => !f.entero && f.nodo === n && t >= f.t && t < (f.hasta ?? (d.fin ? d.fin_datos : Infinity)))
       || (S.fallaYa && S.fallaYa.nodo === n && performance.now() < S.fallaYa.hasta && { replica: "réplica" });  // respuesta inmediata al click
     const lista = activos.get(n);
-    if (caido) { caja.setAttribute("stroke", "var(--alerta)"); caja.setAttribute("fill", "var(--alerta-fondo)"); est.textContent = "caído"; }
+    const rol = g.querySelector(".rol");
+    if (S.demo === "replicas" && n !== "ray-head" && d.ubic.length) {
+      const reps = replicasEn(d, n, t);
+      rol.textContent = reps.length ? (reps.length > 1 ? "réplicas " : "réplica ") + reps.map((r) => r.replace("réplica ", "")).join(" y ") : "sin réplicas";
+    } else rol.textContent = ROL[n];
+    const apagado = d.fallas.find((f) => f.entero && f.nodo === n && t >= f.t && t <= (d.fin ? d.fin_datos : Infinity))
+      || (S.fallaYa && S.fallaYa.entero && S.fallaYa.nodo === n && performance.now() < S.fallaYa.hasta);
+    if (apagado) { caja.setAttribute("stroke", "var(--alerta)"); caja.setAttribute("fill", "var(--alerta-fondo)"); est.textContent = "nodo apagado"; }
+    else if (caido) { caja.setAttribute("stroke", "var(--alerta)"); caja.setAttribute("fill", "var(--alerta-fondo)"); est.textContent = "caído"; }
     else if (falla) { caja.setAttribute("stroke", "var(--alerta)"); caja.setAttribute("fill", "var(--alerta-fondo)"); est.textContent = `${falla.replica || "réplica"} caída · recreándose…`; }
     else if (lista) {
       caja.setAttribute("stroke", "var(--acento)"); caja.setAttribute("fill", "var(--acento-fondo)");
@@ -535,10 +566,27 @@ function dibujarEscenario(t) {
     if (t < x.t0 || t > x.t1) continue;
     const a = POS[x.de], b = POS[x.a]; if (!a || !b) continue;
     const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
-    const rec = 74, p = (t - x.t0) / (x.t1 - x.t0);
+    // un pedido que esperó (por ejemplo, a que Ray recree una réplica) queda quieto en el origen y viaja al final
+    const viaje = Math.min(x.t1 - x.t0, VIAJE), sale = x.t1 - viaje, espera = t < sale;
+    const rec = 74, p = espera ? 0 : (t - sale) / viaje;
     const px = a.x + ux * rec + (dx - ux * rec * 2) * p, py = a.y + uy * rec + (dy - uy * rec * 2) * p;
     const col = colorDe(x.clave).fondo;
-    paq += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="10" fill="${col}" stroke="var(--tinta)" stroke-width="1.5"/>`;
+    paq += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="10" fill="${col}" stroke="var(--tinta)" stroke-width="1.5" opacity="${espera ? 0.4 : 1}"/>`;
+  }
+  // una réplica que Ray recrea en otro nodo: viaja del nodo apagado al nuevo y queda cargando GPT-2
+  for (const f of d.fallas) {
+    if (!f.entero || t < f.t || (f.hasta !== null && t >= f.hasta)) continue;
+    const a = POS[f.nodo]; if (!a) continue;
+    const sale = { x: a.x, y: a.y - 84 };  // flota sobre el nodo apagado mientras Ray le busca otro lugar
+    const destino = f.carga && t >= f.carga.t ? POS[f.carga.nodo] : null;
+    let x = sale.x, y = sale.y, texto = `${f.replica} · buscando nodo`;
+    if (destino) {
+      const p = clamp((t - f.carga.t) / (1.2 * Math.max(S.vel, 0.05)), 0, 1), e = p * p * (3 - 2 * p);
+      x = sale.x + (destino.x - sale.x) * e; y = sale.y + (destino.y - 84 - sale.y) * e - Math.sin(Math.PI * e) * 40;
+      texto = p >= 1 ? `${f.replica} · cargando GPT-2` : f.replica;
+    }
+    paq += `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)})"><rect x="-84" y="-15" width="168" height="30" rx="6" fill="var(--tarjeta)" stroke="var(--alerta)" stroke-width="2" stroke-dasharray="5 4"/>
+      <text x="0" y="5" text-anchor="middle" font-size="13" font-weight="600">${esc(texto)}</text></g>`;
   }
   $("paquetes").innerHTML = paq;
 }
@@ -594,11 +642,17 @@ function dibujarTiempo(t) {
     h += `<line x1="${X(Math.min(x.a_span.t1, t)).toFixed(1)}" y1="${ya}" x2="${X(Math.min(x.b_span.t0, t)).toFixed(1)}" y2="${yb}" stroke="var(--tenue)" stroke-width="1" opacity="0.45"/>`;
   }
   // tramos con una réplica caída, hasta que Ray la vuelve a tener lista
-  for (const f of d.fallas) {
-    const fi = ORDEN_NODOS.indexOf(f.nodo); if (fi < 0 || t < f.t) continue;
-    const x0 = X(f.t), x1 = X(Math.min(f.hasta ?? t, t));
+  const tramo = (fila, desde, hasta, texto) => {
+    const fi = ORDEN_NODOS.indexOf(fila); if (fi < 0 || t < desde) return;
+    const x0 = X(desde), x1 = X(Math.min(hasta, t));
     h += `<rect x="${x0.toFixed(1)}" y="${MT + fi * FILA + 4}" width="${Math.max(0, x1 - x0).toFixed(1)}" height="${FILA - 8}" fill="var(--alerta-fondo)" stroke="var(--alerta)" stroke-dasharray="4 3" rx="4"/>`;
-    if (x1 - x0 > 150) h += `<text x="${(x0 + 8).toFixed(1)}" y="${MT + fi * FILA + FILA / 2 + 4}" font-size="12" style="fill:var(--alerta)">${esc(f.replica)} caída · Ray la recrea</text>`;
+    if (x1 - x0 > texto.length * 6.4 + 12) h += `<text x="${(x0 + 8).toFixed(1)}" y="${MT + fi * FILA + FILA / 2 + 4}" font-size="12" style="fill:var(--alerta)">${esc(texto)}</text>`;
+  };
+  for (const f of d.fallas) {
+    if (f.entero) {
+      tramo(f.nodo, f.t, d.fin ? d.fin_datos : t, `${f.nodo} apagado`);
+      if (f.carga && f.carga.nodo !== f.nodo) tramo(f.carga.nodo, f.carga.t, f.hasta ?? t, `${f.replica} se recrea acá`);
+    } else tramo(f.nodo, f.t, f.hasta ?? t, `${f.replica} caída · Ray la recrea`);
   }
   // barras
   for (const s of d.spans) {

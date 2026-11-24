@@ -7,6 +7,7 @@ de eventos y expone una API chica que usa la página:
   GET  /api/nodos        nodos del cluster (y si están vivos)
   GET  /api/eventos      eventos nuevos desde la posición `desde`
   POST /api/ejecutar     {"demo": "tensores" | "pipeline" | "replicas", ...parámetros}
+  POST /api/cortar       apaga Ray en nodo-b durante la demo de réplicas (vuelve solo al rato)
   POST /api/falla        mata la réplica 2 durante la demo de réplicas (o la réplica en uso del chat)
   GET  /chat.js          la pestaña «Completá la frase» (/?demo=frase)
   POST /api/chat         {"texto", "modo": "replicas" | "pipeline", "palabras"}
@@ -151,15 +152,25 @@ def ver_chat():
     return {**chat_estado, "ahora": time.time()}
 
 
+@app.post("/api/cortar")
+def cortar():
+    if not estado["corriendo"] or estado["demo"] != "replicas":
+        raise HTTPException(409, "se puede cortar un nodo solo con la demo de réplicas en marcha")
+    corte = escenarios.cortar()
+    if corte is None:
+        raise HTTPException(409, "nodo-b ya está apagado o las réplicas todavía no arrancaron")
+    return {"ok": True, **corte}
+
+
 @app.post("/api/falla")
 def falla():
     en_chat = estado["demo"] == "chat" and chat_estado.get("modo") == "replicas"
     if not estado["corriendo"] or not (estado["demo"] == "replicas" or en_chat):
         raise HTTPException(409, "la caída solo se puede simular con réplicas en marcha")
-    nodo = escenarios.caer()
-    if nodo is None:
+    caida = escenarios.caer()
+    if caida is None:
         raise HTTPException(409, "todavía no hay réplicas en marcha: probá en un segundo")
-    return {"ok": True, "nodo": nodo}
+    return {"ok": True, **caida}
 
 
 def main():

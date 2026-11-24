@@ -13,19 +13,35 @@ import torch
 import demo1_tensores as d1
 import demo2_pipeline as d2
 import demo3_router as d3
+from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+
 from cluster import NODOS, en_nodo
 from eventos import emitir
 from modelo import cargar_tokenizer, codificar, decodificar, muestrear
 
 _cache = {"pipeline": None, "replicas": None}  # actores que se conservan entre ejecuciones (cargar GPT-2 tarda)
-_caer = {"f": None}  # la escena en marcha deja acá cómo tirar su réplica
+_caer = {"f": None, "cortar": None}  # la escena en marcha deja acá cómo tirar su réplica o su nodo
 
 
 def caer():
     """La llama POST /api/falla: mata la réplica en el momento (sin esperar al bucle de la
-    escena) y devuelve el nombre del nodo donde estaba, o None si no hay réplicas en marcha."""
+    escena) y devuelve {"nodo", y en el chat "palabra"}, o None si no hay réplicas en marcha."""
     f = _caer["f"]
     return f() if f else None
+
+
+def cortar():
+    """La llama POST /api/cortar: apaga Ray en nodo-b durante la demo de réplicas."""
+    f = _caer["cortar"]
+    return f() if f else None
+
+
+@ray.remote(num_cpus=0)
+def _apagar_ray():
+    import subprocess
+    # «ray stop» normal: el nodo avisa que se va y el cluster lo da por muerto en ~1 s.
+    # src/worker.sh lo vuelve a conectar al rato.
+    subprocess.Popen(["ray", "stop"], start_new_session=True)
 
 
 def _entero(p, nombre, defecto, minimo, maximo):
@@ -144,8 +160,11 @@ def _replicas(n_rep):
         liberar()
         time.sleep(1.5)  # ray.kill es asíncrono: dar tiempo a que se liberen las CPUs antes de ubicar las nuevas
         emitir("estado", texto="Cargando una copia de GPT-2 en cada nodo (la primera vez tarda unos segundos)...")
-        # cada réplica atada a su nodo: si se cae, Ray la recrea en el mismo nodo y no en el otro
-        reps = [d3.Replica.options(**en_nodo(NODOS[i])).remote(f"réplica {i + 1}") for i in range(n_rep)]
+        # cada réplica prefiere su nodo (soft): si se cae solo la réplica, Ray la recrea ahí mismo;
+        # si se apaga el nodo entero, la recrea en otro nodo con lugar
+        ids = {r: n["NodeID"] for n in ray.nodes() if n["Alive"] for r in n["Resources"] if r in NODOS}
+        reps = [d3.Replica.options(**({"scheduling_strategy": NodeAffinitySchedulingStrategy(ids[NODOS[i]], soft=True)}
+                                      if NODOS[i] in ids else {})).remote(f"réplica {i + 1}") for i in range(n_rep)]
         ray.get([r.listo.remote() for r in reps])
         _cache["replicas"] = {"actores": reps, "n": n_rep}
 
@@ -177,7 +196,18 @@ def replicas(p):
     def tirar():
         ray.kill(reps[1], no_restart=False)  # como una caída del proceso: Ray la recrea
         emitir("falla", texto="se cayó la réplica 2", nodo_caido=donde[1])
-        return nombres.get(donde[1])
+        return {"nodo": nombres.get(donde[1])}
+
+    def apagar():
+        if not any(n["Alive"] and n["NodeID"] == donde[1] for n in ray.nodes()):
+            return None  # ya está apagado
+        emitir("falla", texto="nodo apagado, tenía la réplica 2", nodo_caido=donde[1], nodo_entero=True)
+        _apagar_ray.options(**en_nodo(NODOS[1])).remote()
+        _caer["f"] = None  # la réplica 2 se va a otro nodo: «Simular caída» ya no sabría dónde está
+        return {"nodo": nombres.get(donde[1])}
+
+    for k, r in enumerate(donde):  # dónde arranca cada réplica (si Ray la mueve, lo dice el evento «lista»)
+        emitir("ubicacion", replica=f"réplica {k + 1}", nodo_rep=r)
 
     emitir("estado", texto="Midiendo")
     emitir("fase", clave="replicas", texto=f"{pedidos} pedidos a la vez, repartidos entre {n_rep} réplica(s)")
@@ -185,6 +215,7 @@ def replicas(p):
     pendientes = {router.atender.remote(x, tokens, i): i for i, x in enumerate(prompts)}
     completados = 0
     _caer["f"] = tirar if n_rep > 1 else None
+    _caer["cortar"] = apagar if n_rep > 1 else None
     try:
         while pendientes:
             listos, _ = ray.wait(list(pendientes), num_returns=1, timeout=0.3)
@@ -193,7 +224,7 @@ def replicas(p):
                 pendientes.pop(ref)
                 completados += 1
     finally:
-        _caer["f"] = None
+        _caer["f"] = _caer["cortar"] = None
     total = time.perf_counter() - t0
     est = ray.get(router.estadisticas.remote())
     emitir("resumen", fase="replicas", segundos=total, pedidos=pedidos, completados=completados,
@@ -247,7 +278,7 @@ def chat(p, estado):
     def tirar():
         estado["caida"] = {"palabra": len(estado["palabras"]), "nodo": estado["nodo"], "ts": time.time()}
         ray.kill(reps[i], no_restart=False)  # la palabra en curso falla y Ray la reintenta en la réplica recreada
-        return estado["nodo"]
+        return {"nodo": estado["nodo"], "palabra": estado["caida"]["palabra"]}
 
     _caer["f"] = tirar if modo == "replicas" else None
     texto_previo = decodificar(tok, ids)

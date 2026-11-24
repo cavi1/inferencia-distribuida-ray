@@ -54,6 +54,7 @@ Elegí una demo en las pestañas, ajustá los parámetros y apretá **Ejecutar**
 - **Velocidad:** las demos de tensores duran milisegundos. En «× 1/20» o «× 1/50» se ven en cámara lenta. Las mediciones se hacen siempre a velocidad real; la cámara lenta solo cambia cómo se reproduce.
 - **Ver de nuevo:** repite la animación sin volver a ejecutar.
 - **Simular caída** (demo 3): mata el proceso de una réplica en plena ejecución. Ray la recrea y reintenta los pedidos que estaban en curso.
+- **Cortar nodo-b** (demo 3): apaga Ray en nodo-b, como si se desenchufara. Ray recrea la réplica 2 en nodo-a y ningún pedido se pierde. nodo-b vuelve a conectarse solo a los 20 s (`VUELTA_NODO` en `src/worker.sh`).
 
 Qué esperar:
 

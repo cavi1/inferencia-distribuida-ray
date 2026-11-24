@@ -26,6 +26,7 @@ from modelo import Tramo, cargar_modelo, generar, muestrear
 @ray.remote(num_cpus=1, max_restarts=-1, max_task_retries=-1)
 class Replica:
     def __init__(self, nombre):
+        emitir("evento", texto=f"{nombre} cargando")  # el panel ve en qué nodo la recrea Ray antes de que termine
         modelo, _ = cargar_modelo()
         self.tramo = Tramo(modelo, 0, len(modelo.transformer.h))
         self.nombre = nombre

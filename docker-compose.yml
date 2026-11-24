@@ -27,15 +27,15 @@ services:
   ray-worker-1:
     <<: *base
     hostname: nodo-a
-    command: ["ray", "start", "--address=ray-head:6379", "--num-cpus=2",
-              "--resources={\"nodo_a\": 1}", "--block"]
+    command: ["bash", "src/worker.sh", "--address=ray-head:6379", "--num-cpus=2",
+              "--resources={\"nodo_a\": 1}"]
     depends_on: [ray-head]
     restart: on-failure
 
   ray-worker-2:
     <<: *base
     hostname: nodo-b
-    command: ["ray", "start", "--address=ray-head:6379", "--num-cpus=2",
-              "--resources={\"nodo_b\": 1}", "--block"]
+    command: ["bash", "src/worker.sh", "--address=ray-head:6379", "--num-cpus=2",
+              "--resources={\"nodo_b\": 1}"]
     depends_on: [ray-head]
     restart: on-failure

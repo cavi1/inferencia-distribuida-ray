@@ -43,12 +43,12 @@ services:
     <<: *base
     profiles: [escritorio]
     environment: { <<: *env, NOMBRE_NODO: nodo-a }
-    command: ["ray", "start", "--address=${IP_ESCRITORIO}:6379", "--node-ip-address=${IP_ESCRITORIO}",
+    command: ["bash", "src/worker.sh", "--address=${IP_ESCRITORIO}:6379", "--node-ip-address=${IP_ESCRITORIO}",
               "--num-cpus=2", "--resources={\"nodo_a\": 1}",
               "--node-manager-port=6390", "--object-manager-port=6391",
               "--dashboard-agent-listen-port=52375", "--dashboard-agent-grpc-port=52376",
               "--runtime-env-agent-port=52377", "--metrics-export-port=52378",
-              "--min-worker-port=11100", "--max-worker-port=11199", "--block"]
+              "--min-worker-port=11100", "--max-worker-port=11199"]
     depends_on: [ray-head]
     restart: on-failure
 
@@ -56,11 +56,11 @@ services:
     <<: *base
     profiles: [notebook]
     environment: { <<: *env, NOMBRE_NODO: nodo-b }
-    command: ["ray", "start", "--address=${IP_ESCRITORIO:?falta IP_ESCRITORIO en .env}:6379",
+    command: ["bash", "src/worker.sh", "--address=${IP_ESCRITORIO:?falta IP_ESCRITORIO en .env}:6379",
               "--node-ip-address=${IP_NOTEBOOK:?falta IP_NOTEBOOK en .env}",
               "--num-cpus=2", "--resources={\"nodo_b\": 1}",
               "--node-manager-port=6400", "--object-manager-port=6401",
               "--dashboard-agent-listen-port=52385", "--dashboard-agent-grpc-port=52386",
               "--runtime-env-agent-port=52387", "--metrics-export-port=52388",
-              "--min-worker-port=11200", "--max-worker-port=11299", "--block"]
+              "--min-worker-port=11200", "--max-worker-port=11299"]
     restart: on-failure
