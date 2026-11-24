@@ -154,11 +154,25 @@ def pipeline(p):
 
 
 # ---------------------------------------------------------------- demo 3
-def _replicas(n_rep):
+def _vivos():
+    return {r for n in ray.nodes() if n["Alive"] for r in n["Resources"] if r in NODOS}
+
+
+def _esperar_nodos(n_rep, avisar, limite=60):
+    """Tras «Cortar nodo», el nodo vuelve a los ~20 s: se lo espera para repartir una réplica por nodo."""
+    t0 = time.time()
+    while len(_vivos()) < n_rep and time.time() - t0 < limite:
+        faltan = ", ".join(n.replace("_", "-") for n in NODOS[:n_rep] if n not in _vivos())
+        avisar(f"Esperando a que {faltan} vuelva a conectarse…")
+        time.sleep(1)
+
+
+def _replicas(n_rep, avisar=lambda texto: emitir("estado", texto=texto)):
     """Una réplica por nodo (se conservan entre ejecuciones). Devuelve (réplicas, id de nodo de cada una)."""
     def crear():
         liberar()
         time.sleep(1.5)  # ray.kill es asíncrono: dar tiempo a que se liberen las CPUs antes de ubicar las nuevas
+        _esperar_nodos(n_rep, avisar)
         emitir("estado", texto="Cargando una copia de GPT-2 en cada nodo (la primera vez tarda unos segundos)...")
         # cada réplica prefiere su nodo (soft): si se cae solo la réplica, Ray la recrea ahí mismo;
         # si se apaga el nodo entero, la recrea en otro nodo con lugar
@@ -264,12 +278,13 @@ def chat(p, estado):
 
     if modo == "replicas":
         liberar(conservar="replicas")
-        reps, donde = _replicas(2)
+        reps, donde = _replicas(2, avisar=lambda texto: estado.update(aviso=texto))
+        estado.pop("aviso", None)
         if not _cache["replicas"].get("router"):
             _cache["replicas"]["router"] = d3.Router.remote(reps)
         router = _cache["replicas"]["router"]
         i = ray.get(router.elegir.remote())
-        estado.update(replica=f"réplica {i + 1}", nodo=nombres.get(donde[i]), fase="generando")
+        estado.update(replica=f"réplica {i + 1}", nodo=_nombres_nodos().get(donde[i]), fase="generando")  # nombres al día: un nodo que volvió tiene id nuevo
     else:
         liberar(conservar="pipeline")
         e1, e2, _ = _etapas()
@@ -280,7 +295,18 @@ def chat(p, estado):
         ray.kill(reps[i], no_restart=False)  # la palabra en curso falla y Ray la reintenta en la réplica recreada
         return {"nodo": estado["nodo"], "palabra": estado["caida"]["palabra"]}
 
+    def apagar():
+        nodo = estado["nodo"]
+        recurso = nodo.replace("-", "_")
+        if recurso not in _vivos():
+            return None
+        estado["corte"] = {"palabra": len(estado["palabras"]), "nodo": nodo, "replica": f"réplica {i + 1}", "ts": time.time()}
+        _apagar_ray.options(**en_nodo(recurso)).remote()
+        _caer["f"] = None  # la réplica se va a otro nodo
+        return {"nodo": nodo, "palabra": estado["corte"]["palabra"]}
+
     _caer["f"] = tirar if modo == "replicas" else None
+    _caer["cortar"] = apagar if modo == "replicas" else None
     texto_previo = decodificar(tok, ids)
     try:
         for k in range(n):
@@ -300,7 +326,7 @@ def chat(p, estado):
                                        "ms": round((time.perf_counter() - t) * 1000), "ts": time.time()})
             texto_previo = texto
     finally:
-        _caer["f"] = None
+        _caer["f"] = _caer["cortar"] = None
         if modo == "replicas":
             router.soltar.remote(i)
     estado["fase"] = "listo"

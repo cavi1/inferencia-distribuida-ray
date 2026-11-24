@@ -76,7 +76,7 @@ Ray tarda unos segundos en declarar muerto al nodo (por falta de *heartbeats*), 
 
 En la pestaña «4 · Completá la frase» del panel (`http://localhost:8000/?demo=frase`) se escribe el comienzo de una frase en inglés y GPT-2 la completa en el cluster, palabra por palabra. Un dibujo isométrico del cluster muestra qué nodo calcula cada palabra:
 
-- **Réplicas:** el Router elige la réplica menos usada y ese nodo genera toda la frase. «Simular caída» mata la réplica a mitad de frase: Ray la recrea y la frase sigue sin perder palabras.
+- **Réplicas:** el Router elige la réplica menos usada y ese nodo genera toda la frase. «Simular caída» mata la réplica a mitad de frase: Ray la recrea y la frase sigue sin perder palabras. «Cortar nodo» apaga el nodo que está respondiendo: su pila de capas se muda al otro nodo y la frase sigue desde ahí (solo en modo Réplicas).
 - **Pipeline:** cada palabra pasa por las capas 1–6 en nodo-a y por las 7–12 en nodo-b.
 
 GPT-2 small autocompleta texto, no responde preguntas: lo que se muestra es el reparto. El diseño está en `docs/chat-panel.md`. El dibujo (`src/panel/figura.svg`) se genera con `herramientas/figura/build.mjs`.

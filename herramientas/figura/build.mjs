@@ -1,7 +1,7 @@
 // Genera src/panel/figura.svg: el cluster en isométrico para la pestaña «Completá la frase».
 // Usa el kit isométrico de la skill anatomy de Claude Code. Para regenerarlo:
 //   ANATOMY_KIT=~/.claude/skills/anatomy/kit node herramientas/figura/build.mjs
-// La página (chat.html) enciende piezas por data-part y mueve el paquete por los <path data-ruta>.
+// La página (chat.js) enciende piezas por data-part y mueve el paquete por los <path data-ruta>.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -113,11 +113,17 @@ function pila(plan, nodo) {
   const out = [], cx = plan.x + 38, cy = plan.y + 36;
   const cpu = { x: plan.x + 76, y: plan.y + 58, w: 22, d: 20, r: 1.5 };
   out.push(S(k.slabOf(cpu, N_H, 2.4, P, 2, 0.3), { tone: "mid" }) + L(k.planOutline(k.insetPlan(cpu, 3.5), N_H + 2.4, P, 1), { tone: "faint" }) + T(k.topMatrix([cpu.x + 4, cpu.y + 12], N_H + 2.4, P, "x"), "CPU", { size: 3, tone: "lo" }));
-  const card = { x: cx - 24, y: cy - 20, w: 48, d: 40, r: 2.5 };
-  out.push(S(k.slabOf(k.insetPlan(card, -5), N_H, 4, P, 4, 0.6), { tone: "mid" }));
+  out.push(part(`pila-${nodo}`, apilar({ x: cx - 24, y: cy - 20, w: 48, d: 40, r: 2.5 }, nodo)));
+  // segunda pila, oculta: la copia que Ray recrea acá si se apaga el otro nodo (pestaña 4, «Cortar nodo»)
+  out.push(part(`pila-${nodo}2`, apilar({ x: plan.x + 72, y: plan.y + 12, w: 32, d: 30, r: 2 }, `${nodo}2`), ' style="display:none"'));
+  return out.join("");
+}
+
+function apilar(card, id) {
+  const out = [S(k.slabOf(k.insetPlan(card, -5), N_H, 4, P, 4, 0.6), { tone: "mid" })];
   for (let i = 0; i < CAPAS; i++) {
     const z = N_H + 4 + i * PITCH;
-    out.push(part(`capa-${nodo}-${i + 1}`, S(k.slabOf(card, z, LAMINA, P, 4, 0.4), { tone: "hi", crease: "lo" })));
+    out.push(part(`capa-${id}-${i + 1}`, S(k.slabOf(card, z, LAMINA, P, 4, 0.4), { tone: "hi", crease: "lo" })));
   }
   out.push(S(k.slabOf(k.insetPlan(card, 2), N_H + 4 + CAPAS * PITCH, 3, P, 4, 0.5), { tone: "mid" }));
   return out.join("");

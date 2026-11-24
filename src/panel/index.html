@@ -120,7 +120,10 @@
   #vistaFrase .cuantas button { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta); cursor: pointer; font-size: 16px; line-height: 1; }
   #vistaFrase #cuantas { min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; color: var(--tinta); font-weight: 600; }
   #vistaFrase #caida { margin-left: auto; border: 1px solid var(--alerta); color: var(--alerta); background: transparent; border-radius: 6px; padding: 6px 14px; cursor: pointer; font: inherit; }
-  #vistaFrase #caida:disabled { opacity: .35; cursor: default; }
+  #vistaFrase #caida:disabled, #vistaFrase #cortar:disabled { opacity: .35; cursor: default; }
+  #vistaFrase #cortar { border: 1px solid var(--alerta); color: var(--alerta); background: transparent; border-radius: 6px; padding: 6px 14px; cursor: pointer; font: inherit; }
+  #vistaFrase #salida .corte { font: 600 13px/1 var(--sans); color: var(--alerta); background: var(--alerta-fondo); border-radius: 4px; padding: 3px 7px; margin: 0 6px; vertical-align: 2px; white-space: nowrap; }
+  #vistaFrase [data-part^="pila-"] { transition: opacity .3s ease; }
   #vistaFrase #error { display: none; background: var(--alerta-fondo); color: var(--alerta); border-radius: 10px; padding: 10px 14px; }
 
   /* el dibujo va directo sobre el fondo */
@@ -185,6 +188,7 @@
       </div>
       <div class="cuantas"><button type="button" id="menos" aria-label="Menos palabras">−</button><span id="cuantas">20</span><button type="button" id="mas" aria-label="Más palabras">+</button> palabras</div>
       <button type="button" id="caida" disabled>Simular caída</button>
+      <button type="button" id="cortar" disabled>Cortar nodo</button>
     </div>
   </form>
   <div id="error"></div>
